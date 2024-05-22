@@ -10,7 +10,7 @@ def test_random_rotate_and_resize__default():
 
 
 def test_normalize_img(data_dir):
-    img = io.imread(str(data_dir.joinpath('3D').joinpath('rgb_3D.tif')))
+    img = io.imread(str(data_dir.joinpath('3D').joinpath('rgb_3D.tif')))[0]
     img = img.transpose(0, 2, 3, 1).astype('float32')
 
     img_norm = normalize_img(img, norm3D=True)

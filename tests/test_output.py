@@ -30,7 +30,7 @@ def clear_output(data_dir, image_names):
 def test_class_2D(data_dir, image_names):
     clear_output(data_dir, image_names)
     image_name = "rgb_2D.png"
-    img = io.imread(str(data_dir.joinpath("2D").joinpath(image_name)))
+    img = io.imread(str(data_dir.joinpath("2D").joinpath(image_name)))[0]
     model_types = ["nuclei"]
     chan = [1]
     chan2 = [0]
@@ -53,7 +53,7 @@ def test_cyto2_to_seg(data_dir, image_names):
     file_names = [
         str(data_dir.joinpath("2D").joinpath(image_name)) for image_name in image_names
     ]
-    imgs = [io.imread(file_name) for file_name in file_names]
+    imgs = [io.imread(file_name)[0] for file_name in file_names]
     model_type = "cyto2"
     model = models.Cellpose(model_type=model_type)
     channels = [2, 1]
@@ -63,7 +63,7 @@ def test_cyto2_to_seg(data_dir, image_names):
 
 def test_class_3D(data_dir, image_names):
     clear_output(data_dir, image_names)
-    img = io.imread(str(data_dir.joinpath("3D").joinpath("rgb_3D.tif")))
+    img = io.imread(str(data_dir.joinpath("3D").joinpath("rgb_3D.tif")))[0]
     model_types = ["nuclei"]
     chan = [1]
     chan2 = [0]
@@ -119,7 +119,7 @@ def test_outlines_list(data_dir, image_names):
     image_name = "rgb_2D.png"
 
     file_name = str(data_dir.joinpath("2D").joinpath(image_name))
-    img = io.imread(file_name)
+    img = io.imread(file_name)[0]
 
     model = models.Cellpose(model_type=model_type)
     masks, _, _, _ = model.eval(img, diameter=30, channels=channels)

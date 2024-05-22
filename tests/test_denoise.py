@@ -23,7 +23,7 @@ def clear_output(data_dir, image_names):
 def test_class_2D(data_dir, image_names):
     clear_output(data_dir, image_names)
     image_name = "gray_2D.png"
-    img = io.imread(str(data_dir.joinpath("2D").joinpath(image_name)))
+    img = io.imread(str(data_dir.joinpath("2D").joinpath(image_name)))[0]
     model_types = ["denoise_cyto3", "deblur_cyto3", "upsample_cyto3"]
     chan = [2,1,0]
     chan2 = [1,0,0]
@@ -41,7 +41,7 @@ def test_class_2D(data_dir, image_names):
 def test_dn_cp_class_2D(data_dir, image_names):
     clear_output(data_dir, image_names)
     image_name = "rgb_2D.png"
-    img = io.imread(str(data_dir.joinpath("2D").joinpath(image_name)))
+    img = io.imread(str(data_dir.joinpath("2D").joinpath(image_name)))[0]
     model_types = ["denoise_cyto3", "deblur_cyto3", "upsample_cyto3"]
     chan = [2,1,0]
     chan2 = [1,0,0]

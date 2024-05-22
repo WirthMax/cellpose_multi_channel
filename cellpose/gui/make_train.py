@@ -72,7 +72,7 @@ def main():
     os.makedirs(os.path.join(args.dir, 'train/'), exist_ok=True)
     for name in image_names:
         name0 = os.path.splitext(os.path.split(name)[-1])[0]
-        img = io.imread(name)
+        img, metainf = io.imread(name)
         #print(img.shape)
         Ly, Lx = img.shape[1:3]
         img = img[8:]

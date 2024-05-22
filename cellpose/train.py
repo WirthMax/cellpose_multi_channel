@@ -58,7 +58,7 @@ def _get_batch(inds, data=None, labels=None, files=None, labels_files=None,
     """
     if data is None:
         lbls = None
-        imgs = [io.imread(files[i]) for i in inds]
+        imgs = [io.imread(files[i])[0] for i in inds]
         imgs = _reshape_norm(imgs, channels=channels, channel_axis=channel_axis,
                              rgb=rgb, normalize_params=normalize_params)
         if labels_files is not None:
@@ -131,7 +131,7 @@ def _reshape_norm_save(files, channels=None, channel_axis=None,
     """ not currently used -- normalization happening on each batch if not load_files """
     files_new = []
     for f in trange(files):
-        td = io.imread(f)
+        td = io.imread(f)[0]
         if channels is not None:
             td = transforms.convert_image(td, channels=channels,
                                           channel_axis=channel_axis)
@@ -206,11 +206,11 @@ def _process_train_test(train_data=None, train_labels=None, train_files=None,
         else:
             # load all images
             train_logger.info(">>> loading images and labels")
-            train_data = [io.imread(train_files[i]) for i in trange(nimg)]
+            train_data = [io.imread(train_files[i])[0] for i in trange(nimg)]
             train_labels = [io.imread(train_labels_files[i]) for i in trange(nimg)]
         nimg_test = len(test_files) if test_files is not None else None
         if load_files and nimg_test:
-            test_data = [io.imread(test_files[i]) for i in trange(nimg_test)]
+            test_data = [io.imread(test_files[i])[0] for i in trange(nimg_test)]
             test_labels = [io.imread(test_labels_files[i]) for i in trange(nimg_test)]
 
     ### check that arrays are correct size

@@ -28,6 +28,22 @@ except:
     MATPLOTLIB = False
 
 
+
+# @njit(parallel=True, fastmath=True)   
+def colorize(im, color, clip_percentile=0.1):
+    """
+    Helper function to create an RGB image from a single-channel image using a 
+    specific color.
+    """
+    # Check that we do just have a 2D image
+    if im.ndim > 2 and im.shape[2] != 1:
+        raise ValueError('This function expects a single-channel image!')
+    # Need to make sure we have a channels dimension for the multiplication to work
+    im_scaled = np.atleast_3d(im)
+    im_scaled = im_scaled*color[:3]
+    return (im_scaled - np.min(im_scaled))/np.ptp(im_scaled)
+
+
 def _init_model_list(parent):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     parent.model_list_path = MODEL_LIST_PATH
@@ -90,7 +106,7 @@ def _get_train_set(image_names):
                 data = dat["img_restore"].squeeze()
                 restore = dat["restore"]
             else:
-                data = imread(image_name_full)
+                data, metainf = imread(image_name_full)
             normalize_params = dat[
                 "normalize_params"] if "normalize_params" in dat else normalize_default
         if label_name is not None:
@@ -111,7 +127,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     load_mask = False
     if load_seg:
         if os.path.isfile(manual_file) and not parent.autoloadMasks.isChecked():
-            _load_seg(parent, manual_file, image=imread(filename), image_file=filename,
+            _load_seg(parent, manual_file, image=imread(filename)[0], image_file=filename,
                       load_3D=load_3D)
             return
         elif parent.autoloadMasks.isChecked():
@@ -122,7 +138,7 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
             load_mask = True if os.path.isfile(mask_file) else False
     try:
         print(f"GUI_INFO: loading image: {filename}")
-        image = imread(filename)
+        image, metainf = imread(filename)
         parent.loaded = True
     except Exception as e:
         print("ERROR: images not compatible")
@@ -132,14 +148,17 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
         parent.reset()
         parent.filename = filename
         filename = os.path.split(parent.filename)[-1]
-        _initialize_images(parent, image, load_3D=load_3D)
+        _initialize_images(parent = parent, 
+                           image = image, 
+                           metainf = metainf,
+                           load_3D=load_3D)
         parent.loaded = True
         parent.enable_buttons()
         if load_mask:
             _load_masks(parent, filename=mask_file)
 
 
-def _initialize_images(parent, image, load_3D=False):
+def _initialize_images(parent, image, metainf, load_3D=False):
     """ format image for GUI """
     load_3D = parent.load_3D if load_3D is False else load_3D
     parent.nchan = 3
@@ -179,9 +198,13 @@ def _initialize_images(parent, image, load_3D=False):
             raise ValueError(
                 "cannot load 2D stack in 3D mode, run 'python -m cellpose' for 2D GUI")
 
-    if image.shape[-1] > 3:
-        print("WARNING: image has more than 3 channels, keeping only first 3")
-        image = image[..., :3]
+
+    parent.nchan = image.shape[-1]
+    
+    print(parent.metainf)
+    if not metainf is None:
+        parent.metainf = metainf
+
     elif image.shape[-1] == 2:
         # fill in with blank channels to make 3 channels
         shape = image.shape
@@ -236,15 +259,17 @@ def _initialize_images(parent, image, load_3D=False):
                 "GUI_INFO: normalization checked: computing saturation levels (and optionally filtered image)"
             )
             parent.compute_saturation()
-    elif len(parent.saturation) != parent.NZ:
-        parent.saturation = []
-        for r in range(3):
-            parent.saturation.append([])
-            for n in range(parent.NZ):
-                parent.saturation[-1].append([0, 255])
-            parent.sliders[r].setValue([0, 255])
+    # elif len(parent.saturation) != parent.NZ:
+    #     parent.saturation = []
+    #     for r in range(3):
+    #         parent.saturation.append([])
+    #         for n in range(parent.NZ):
+    #             parent.saturation[-1].append([0, 255])
+    #         parent.sliders[r].setValue([0, 255])
+    parent.update_channel_cols()
     parent.compute_scale()
     parent.track_changes = []
+    parent._init_sliders()
 
     if load_3D:
         parent.currentZ = int(np.floor(parent.NZ / 2))
@@ -254,7 +279,7 @@ def _initialize_images(parent, image, load_3D=False):
         parent.currentZ = 0
 
 
-def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False):
+def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None, load_3D=False):
     """ load *_seg.npy with filename; if None, open QFileDialog """
     if filename is None:
         name = QFileDialog.getOpenFileName(parent, "Load labelled data", filter="*.npy")
@@ -286,7 +311,7 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
         if found_image:
             try:
                 print(parent.filename)
-                image = imread(parent.filename)
+                image, metainf = imread(parent.filename)
             except:
                 parent.loaded = False
                 found_image = False
@@ -348,7 +373,10 @@ def _load_seg(parent, filename=None, image=None, image_file=None, load_3D=False)
 
     parent.set_restore_button()
 
-    _initialize_images(parent, image, load_3D=load_3D)
+    _initialize_images(parent = parent, 
+                       image = image, 
+                       metainf = metainf, 
+                       load_3D=load_3D)
     print(parent.stack.shape)
     if "chan_choose" in dat:
         parent.ChannelChoose[0].setCurrentIndex(dat["chan_choose"][0])

@@ -189,7 +189,7 @@ def main():
             tqdm_out = utils.TqdmToLogger(logger, level=logging.INFO)
 
             for image_name in tqdm(image_names, file=tqdm_out):
-                image = io.imread(image_name)
+                image, metainf = io.imread(image_name)
                 out = model.eval(
                     image, channels=channels, diameter=diameter, do_3D=args.do_3D,
                     augment=args.augment, resample=(not args.no_resample),
@@ -255,7 +255,7 @@ def main():
 
             # training with all channels
             if args.all_channels:
-                img = images[0] if images is not None else io.imread(image_names[0])
+                img = images[0] if images is not None else io.imread(image_names[0])[0]
                 if img.ndim == 3:
                     nchan = min(img.shape)
                 elif img.ndim == 2:

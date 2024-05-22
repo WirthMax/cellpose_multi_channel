@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 from . import version_str
 from roifile import ImagejRoi, roiwrite
-
+import ast
 try:
     from qtpy import QtGui, QtCore, Qt, QtWidgets
     from qtpy.QtWidgets import QMessageBox
@@ -158,6 +158,13 @@ def imread(filename):
     ext = os.path.splitext(filename)[-1].lower()
     if ext == ".tif" or ext == ".tiff":
         with tifffile.TiffFile(filename) as tif:
+            
+            try:
+                metainf = ast.literal_eval(tif.pages[0].description)
+                metainf = {int(key):val for key, val in enumerate(metainf.values())}
+            except:
+                metainf = None
+            
             ltif = len(tif.pages)
             try:
                 full_shape = tif.shaped_metadata[0]["shape"]
@@ -178,33 +185,33 @@ def imread(filename):
                 for i, page in enumerate(tqdm(tif.series[0])):
                     img[i] = page.asarray()
                 img = img.reshape(full_shape)
-        return img
+        return img, metainf
     elif ext == ".dax":
         img = load_dax(filename)
-        return img
+        return img, None
     elif ext == ".nd2":
         if not ND2:
             io_logger.critical("ERROR: need to 'pip install nd2' to load in .nd2 file")
-            return None
+            return None, None
     elif ext == ".nrrd":
         if not NRRD:
             io_logger.critical(
                 "ERROR: need to 'pip install pynrrd' to load in .nrrd file")
-            return None
+            return None, None
         else:
             img, metadata = nrrd.read(filename)
             if img.ndim == 3:
                 img = img.transpose(2, 0, 1)
-            return img
+            return img, None
     elif ext != ".npy":
         try:
             img = cv2.imread(filename, -1)  #cv2.LOAD_IMAGE_ANYDEPTH)
             if img.ndim > 2:
                 img = img[..., [2, 1, 0]]
-            return img
+            return img, None
         except Exception as e:
             io_logger.critical("ERROR: could not read file, %s" % e)
-            return None
+            return None, None
     else:
         try:
             dat = np.load(filename, allow_pickle=True).item()
@@ -425,7 +432,7 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
     for n in range(nimg):
         if (os.path.isfile(label_names[n]) or 
             (flow_names is not None and os.path.isfile(flow_names[0]))):
-            image = imread(image_names[n])
+            image, metainf = imread(image_names[n])
             if label_names is not None:
                 label = imread(label_names[n])
             if flow_names is not None:

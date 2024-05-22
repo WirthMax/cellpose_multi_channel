@@ -949,7 +949,7 @@ def train(net, train_data=None, train_labels=None, train_files=None, test_data=N
         for ibatch in range(0, nimg_per_epoch, batch_size):
             inds = rperm[ibatch:ibatch + batch_size]
             if train_data is None:
-                imgs = [np.maximum(0, io.imread(train_files[i])[:nchan]) for i in inds]
+                imgs = [np.maximum(0, io.imread(train_files[i])[0][:nchan]) for i in inds]
                 lbls = [io.imread(train_labels_files[i])[1:] for i in inds]
             else:
                 imgs = [train_data[i][:nchan] for i in inds]
@@ -989,7 +989,7 @@ def train(net, train_data=None, train_labels=None, train_files=None, test_data=N
                     if test_data is None:
                         imgs = [
                             np.maximum(0,
-                                       io.imread(test_files[i])[:nchan]) for i in inds
+                                       io.imread(test_files[i])[0][:nchan]) for i in inds
                         ]
                         lbls = [io.imread(test_labels_files[i])[1:] for i in inds]
                     else:
