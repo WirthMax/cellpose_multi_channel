@@ -8,10 +8,15 @@ import torch
 from torch import nn
 from tqdm import trange
 from numba import prange
+from matplotlib import cm
+import matplotlib.pyplot as plt
 
 import logging
 
 train_logger = logging.getLogger(__name__)
+
+from tensorboardX import SummaryWriter
+from .utils import multiclass, IoU_binary, f1_score_binary
 
 
 def _loss_fn_seg(lbl, y, device):
@@ -30,11 +35,11 @@ def _loss_fn_seg(lbl, y, device):
     criterion = nn.MSELoss(reduction="mean")
     criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
     veci = 5. * torch.from_numpy(lbl[:, 1:]).to(device)
-    loss = criterion(y[:, :2], veci)
-    loss /= 2.
+    loss1 = criterion(y[:, :2], veci)
+    loss1 /= 2.
     loss2 = criterion2(y[:, -1], torch.from_numpy(lbl[:, 0] > 0.5).to(device).float())
-    loss = loss + loss2
-    return loss
+    loss = loss1 + loss2
+    return loss, loss1, loss2
 
 
 def _get_batch(inds, data=None, labels=None, files=None, labels_files=None,
@@ -329,7 +334,7 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
               n_epochs=2000, weight_decay=1e-5, momentum=0.9, SGD=False, channels=None,
               channel_axis=None, rgb=False, normalize=True, compute_flows=False,
               save_path=None, save_every=100, nimg_per_epoch=None,
-              nimg_test_per_epoch=None, rescale=True, scale_range=None, bsize=224,
+              nimg_test_per_epoch=None, rescale=True, scale_range=None, bsize=448,
               min_train_masks=5, model_name=None):
     """
     Train the network with images for segmentation.
@@ -444,7 +449,15 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
     model_path = save_path / "models" / model_name
     (save_path / "models").mkdir(exist_ok=True)
 
+    # Create a TensorBoard summary writer for logging
+    writer = SummaryWriter(save_path / 'log')
+    print("Tensorboard path:", save_path / 'log')
+    # define label colormap
+    cmap = cm.get_cmap("prism").copy()
+    cmap.set_bad(color='black')
+
     train_logger.info(f">>> saving model to {model_path}")
+    
 
     lavg, nsum = 0, 0
     for iepoch in range(n_epochs):
@@ -473,7 +486,8 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
 
             X = torch.from_numpy(imgi).to(device)
             y = net(X)[0]
-            loss = _loss_fn_seg(lbl, y, device)
+            loss, train_MSELoss,train_BCE_loss = _loss_fn_seg(lbl, y, device)
+            train_MSELoss,train_BCE_loss = train_MSELoss.item(),train_BCE_loss.item()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -482,8 +496,58 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
             train_loss *= len(imgi)
             lavg += train_loss
             nsum += len(imgi)
+            writer.add_scalar('info/7_lr', LR[iepoch], iepoch)
+            writer.add_scalar('info/4_total_loss_CP', train_loss, iepoch)
+            writer.add_scalar('info/2_MSE_loss', train_MSELoss, iepoch)
+            writer.add_scalar('info/0_BCE_loss', train_BCE_loss, iepoch)
 
         if iepoch == 5 or iepoch % 10 == 0:
+            
+        
+            # pred = torch.argmax(torch.softmax(outputs, dim=1), dim=1, keepdim=True).cpu().detach().numpy()
+            output = y[0].cpu().detach().numpy()
+            label = lbl[0]
+            image_train = X[0].cpu().detach().numpy()
+            
+            
+            image = np.expand_dims(np.mean(image_train, 0), 0)
+            image = (image - image.min()) / (image.max() - image.min())
+            writer.add_image('train/Image', image, iepoch)
+            
+            cellprob = output[2]
+            dP = output[:2]
+            out_mask, p = dynamics.compute_masks(dP = dP, cellprob = cellprob, cellprob_threshold = 0.0, flow_threshold = 1.0)
+            orig_label, _ = dynamics.compute_masks(dP = label[1:], cellprob = label[0], cellprob_threshold = 0.0, flow_threshold = 1.0)
+            
+            
+            
+            # calculate IoU
+            F1 = multiclass(out_mask.astype(int), orig_label.astype(int), f1_score_binary)
+            # binary_f1 = f1_score_binary(np.clip(label[0].flatten(), 0, 1), (cellprob > -0.25).flatten())
+            IoU = multiclass(out_mask.astype(int), orig_label.astype(int), IoU_binary)
+            writer.add_scalar('info/8_IoU_train', IoU, iepoch)
+            writer.add_scalar('info/9_f1_train', F1, iepoch)
+            
+            
+            # plot the predictions
+            out_mask = out_mask.astype(float)
+            norm_pred = plt.Normalize(np.min(out_mask), np.max(out_mask))
+            out_mask[out_mask==0.] = np.nan
+            writer.add_image('train/Prediction', np.transpose(np.uint8(cmap((norm_pred(out_mask)))*255), (2, 0, 1)), iepoch)
+            writer.add_image('train/Prediction_cellprob', np.transpose(np.uint8(cm.gray(output[0])*255), (2, 0, 1)), iepoch)
+            writer.add_image('train/Prediction_Y_flows', np.transpose(np.uint8(cm.bwr(output[1] + 0.5)*255), (2, 0, 1)), iepoch)
+            writer.add_image('train/Prediction_X_flows', np.transpose(np.uint8(cm.bwr(output[2] + 0.5)*255), (2, 0, 1)), iepoch)
+    
+            
+            # plot the labels
+            orig_label = orig_label.astype(float)
+            norm_label = plt.Normalize(np.min(orig_label), np.max(label[0]))
+            orig_label[orig_label==0.] = np.nan
+            writer.add_image('train/GroundTruth', np.transpose(np.uint8(cmap((norm_label(orig_label)))*255), (2, 0, 1)), iepoch)
+            writer.add_image('train/GroundTruth_binary_mask', np.expand_dims((orig_label.astype(float)>.5).astype(float) * 50, 0), iepoch)
+            writer.add_image('train/GroundTruth_Y_flows', np.transpose(np.uint8(cm.bwr(label[1] + 0.5)*255), (2, 0, 1)), iepoch)
+            writer.add_image('train/GroundTruth_X_flows', np.transpose(np.uint8(cm.bwr(label[2] + 0.5)*255), (2, 0, 1)), iepoch)
+            
             lavgt = 0.
             if test_data is not None or test_files is not None:
                 np.random.seed(42)
@@ -508,11 +572,62 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
                             xy=(bsize, bsize))[:2]
                         X = torch.from_numpy(imgi).to(device)
                         y = net(X)[0]
-                        loss = _loss_fn_seg(lbl, y, device)
-                        test_loss = loss.item()
+                        loss, test_MSELoss,test_BCE_loss  = _loss_fn_seg(lbl, y, device)
+                        test_loss, test_MSELoss,test_BCE_loss = loss.item(), test_MSELoss.item(),test_BCE_loss.item()
                         test_loss *= len(imgi)
                         lavgt += test_loss
                 lavgt /= len(rperm)
+                
+                
+                output = y[0].cpu().detach().numpy()
+                image_test = X[0].cpu().detach().numpy()
+                label = lbl[0]
+                
+                
+                cellprob = output[2]
+                dP = output[:2]
+                out_mask, p = dynamics.compute_masks(dP = dP, cellprob = cellprob, cellprob_threshold = 0.0, flow_threshold = 1.0)
+                orig_label, _ = dynamics.compute_masks(dP = label[1:], cellprob = label[0], cellprob_threshold = 0.0, flow_threshold = 1.0)
+                orig_label = orig_label.astype(int)
+                
+                writer.add_scalar('info/5_total_loss_CP_test', test_loss, iepoch)
+                writer.add_scalar('info/3_MSE_loss_test', test_MSELoss, iepoch)
+                writer.add_scalar('info/1_BCE_loss_test', test_BCE_loss, iepoch)
+                
+                # calculate IoU
+                F1 = multiclass(out_mask.astype(int), orig_label.astype(int), f1_score_binary)
+                # binary_f1 = f1_score_binary(np.clip(label[0].flatten(), 0, 1), (cellprob > -0.25).flatten())
+                IoU = multiclass(out_mask.astype(int), orig_label.astype(int), IoU_binary)
+                writer.add_scalar('info/6_IoU_test', IoU, iepoch)
+                writer.add_scalar('info/7_f1_test', F1, iepoch)
+                
+                
+                image = np.expand_dims(np.mean(image_test, 0), 0)
+                image = (image - image.min()) / (image.max() - image.min())
+                writer.add_image('test/Image', image, iepoch)
+                
+                
+                # plot the labels
+                orig_label = orig_label.astype(float)
+                norm_label = plt.Normalize(np.min(orig_label), np.max(orig_label))
+                orig_label[orig_label==0.] = np.nan
+                writer.add_image('test/GroundTruth', np.transpose(np.uint8(cmap((norm_label(orig_label)))*255), (2, 0, 1)), iepoch)
+                writer.add_image('test/GroundTruth_binary_mask', np.expand_dims((orig_label.astype(float)>.5).astype(float) * 50, 0), iepoch)
+                writer.add_image('test/GroundTruth_Y_flows', np.transpose(np.uint8(cm.bwr(label[1] + 0.5)*255), (2, 0, 1)), iepoch)
+                writer.add_image('test/GroundTruth_X_flows', np.transpose(np.uint8(cm.bwr(label[2] + 0.5)*255), (2, 0, 1)), iepoch)
+        
+                # plot the predictions
+                out_mask = out_mask.astype(float)
+                norm_pred = plt.Normalize(np.min(out_mask), np.max(out_mask))
+                out_mask[out_mask==0.] = np.nan
+                writer.add_image('test/Prediction', np.transpose(np.uint8(cmap((norm_pred(out_mask)))*255), (2, 0, 1)), iepoch)
+                writer.add_image('test/Prediction_cellprob', np.transpose(np.uint8(cm.gray(output[0])*255), (2, 0, 1)), iepoch)
+                writer.add_image('test/Prediction_Y_flows', np.transpose(np.uint8(cm.bwr(output[1] + 0.5)*255), (2, 0, 1)), iepoch)
+                writer.add_image('test/Prediction_X_flows', np.transpose(np.uint8(cm.bwr(output[2] + 0.5)*255), (2, 0, 1)), iepoch)
+                
+                del out_mask, norm_pred, orig_label, image, image_test, image_train, cellprob, output
+                
+                
             lavg /= nsum
             train_logger.info(
                 f"{iepoch}, train_loss={lavg:.4f}, test_loss={lavgt:.4f}, LR={LR[iepoch]:.4f}, time {time.time()-t0:.2f}s"

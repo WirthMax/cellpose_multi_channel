@@ -22,6 +22,133 @@ except:
     SKIMAGE_ENABLED = False
 
 
+
+
+# @njit(parallel=True, fastmath=True)
+def calculate_confusion_matrix(y_true, y_pred):
+    """Calculate the confusion matrix based on the given labels and predictions.
+
+    COPIED FROM MBRUHNS FAST CONFUSION MATRIX
+
+    Args:
+        y_true: A 1D array-like object representing the true labels.
+        y_pred: A 1D array-like object representing the predicted labels.
+
+    Returns:
+        A tuple containing the true positives, true negatives, false positives, and false negatives.
+
+    Raises:
+        None
+    """
+    # Some basic asserts
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    assert y_true.ndim == y_pred.ndim == 1
+
+    tp = np.sum(y_true * y_pred)
+    fn = np.sum(y_true * (1 - y_pred))
+    fp = np.sum((1 - y_true) * y_pred)
+    tn = np.sum((1 - y_true) * (1 - y_pred))
+
+    return tp, tn, fp, fn
+
+
+# @njit(fastmath=True)
+def precision_score(y_true, y_pred):
+    """Calculate the precision score based on the given true labels and predicted labels.
+
+    COPIED FROM MBRUHNS FAST CONFUSION MATRIX
+
+    Args:
+        y_true: A 1D array-like object representing the true labels.
+        y_pred: A 1D array-like object representing the predicted labels.
+
+    Returns:
+        The precision score, which is the ratio of true positives to the sum of true positives and false positives.
+
+    Raises:
+        None
+    """
+    tp, tn, fp, fn = calculate_confusion_matrix(y_true, y_pred)
+    return tp / (tp + fp)
+
+
+# @njit(fastmath=True)
+def recall_score(y_true, y_pred):
+    """Calculate the recall score based on the given true labels and predicted labels.
+
+    COPIED FROM MBRUHNS FAST CONFUSION MATRIX
+
+    Args:
+        y_true: A 1D array-like object representing the true labels.
+        y_pred: A 1D array-like object representing the predicted labels.
+
+    Returns:
+        The recall score, which is the ratio of true positives to the sum of true positives and false negatives.
+
+    Raises:
+        None
+    """
+    tp, tn, fp, fn = calculate_confusion_matrix(y_true, y_pred)
+    return tp / (tp + fn)
+
+
+# @njit(fastmath=True)
+def f1_score_binary(y_true, y_pred):
+    """Calculate the binary F1 score based on the given true labels and predicted labels.
+
+    COPIED FROM MBRUHNS FAST CONFUSION MATRIX
+
+    Args:
+        y_true: A 1D array-like object representing the true labels.
+        y_pred: A 1D array-like object representing the predicted labels.
+
+    Returns:
+        The F1 score, which is the harmonic mean of precision and recall, providing a balanced measure of
+        model performance.
+
+    Raises:
+        None
+    """
+    prec = precision_score(y_true, y_pred)
+    rec = recall_score(y_true, y_pred)
+    if prec == 0.0 and rec == 0.0:
+        return 0.0
+    else:
+        return 2 * (prec * rec) / (prec + rec)
+    
+# @njit(fastmath=True)
+def multiclass(predicted, target, metric):
+    predicted += 1
+    scores = []
+    counts = []
+    for i in np.unique(target):
+        true_mask = (target == i).astype("int")
+        cnt = np.sum(true_mask)
+        counts.append(cnt)
+        pre_mask = predicted*true_mask
+        tmp = []
+        js = []
+        for j in np.unique(pre_mask):
+            s = metric((pre_mask == j).astype("int").flatten(), true_mask.flatten())
+            tmp.append(s)
+            js.append(j)
+        scores.append(max(tmp)*cnt)
+        predicted *= (predicted != js[tmp.index(max(tmp))])
+    return sum(scores)/sum(counts)
+        
+
+# @njit(fastmath=True)
+def IoU_binary(predicted, target):
+    union = np.sum(np.clip(predicted + target, 0, 1))
+    intersection = np.sum(((predicted + target) == 2).astype("int"))
+    IoU = intersection / union if union != 0 else 0.0
+    return IoU
+
+
+
+
+
 class TqdmToLogger(io.StringIO):
     """
         Output stream for TQDM which will output to logger module instead of

@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import datetime
 from einops import rearrange
 from functools import reduce, lru_cache
+from operator import mul
 
 
 import numpy as np
@@ -869,18 +870,18 @@ class upsample(nn.Module):
             if inx == 0:
                 x = layer_up(x)
             else:
-                # x = torch.cat([x, x_downsample[::-1][inx-1]], 1)
-                # B, C, D, H, W = x.shape
-                # x = x.flatten(2).transpose(1, 2)
-                # x = self.concat_back_dim[inx-1](x)
-                # # _, _, C = x.shape
-                # x = x.view(B, D, H, W, C//2)
+                x = torch.cat([x, x_downsample[::-1][inx-1]], 1)
+                B, C, D, H, W = x.shape
+                x = x.flatten(2).transpose(1, 2)
+                x = self.concat_back_dim[inx-1](x)
+                # _, _, C = x.shape
+                x = x.view(B, D, H, W, C//2)
 
-                # x = x.permute(0, 4, 1, 2, 3)
+                x = x.permute(0, 4, 1, 2, 3)
                 
-                x = self.batchconv_style[inx-1](style = style, 
-                                                x = self.batchconv[inx-1](x), 
-                                                y=x_downsample[3 - inx])
+                # x = self.batchconv_style[inx-1](style = style, 
+                #                                 x = self.batchconv[inx-1](x), 
+                #                                 y=x_downsample[3 - inx])
                 x = layer_up(x, 
                              prev_x = x_downsample[::-1][inx-1],
                              prev_v1 = v_values_1[::-1][inx-1], 
@@ -1010,8 +1011,8 @@ class convup(nn.Module):
         return x
 
 
-    class Transformer(nn.Module):
-        """
+class Transformer(nn.Module):
+    """
     CPnet is the Transformer based Cellpose neural network model used for cell segmentation and image restoration.
 
     Args:
@@ -1093,6 +1094,10 @@ class convup(nn.Module):
                                         requires_grad=False)
 
         self.model_string = "Transformer"
+        
+        
+        
+        
     @property
     def device(self):
         """
@@ -1113,7 +1118,6 @@ class convup(nn.Module):
         Returns:
             tuple: A tuple containing the output tensor, style tensor, and downsampled tensors.
         """
-        print("RUNNING MY MODEL")
         if self.mkldnn:
             data = data.to_mkldnn()
         B, C, H, W = data.shape
