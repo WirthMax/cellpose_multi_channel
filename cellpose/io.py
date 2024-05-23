@@ -436,7 +436,7 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
             if label_names is not None:
                 label = imread(label_names[n])
             if flow_names is not None:
-                flow = imread(flow_names[n])
+                flow = imread(flow_names[n])[0]
                 if flow.shape[0] < 4:
                     label = np.concatenate((label[np.newaxis, :, :], flow), axis=0)
                 else:

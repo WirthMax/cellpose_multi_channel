@@ -11,8 +11,6 @@ import datetime
 from einops import rearrange
 from functools import reduce, lru_cache
 
-from functools import reduce, lru_cache
-from operator import mul
 
 import numpy as np
 import torch.utils.checkpoint as checkpoint
