@@ -776,30 +776,30 @@ class downsample(nn.Module):
         self.norm = norm_layer(int(embed_dim * 2 ** (len(depths))))
 
     def forward(self, x):
-        x = self.patch_embed(x)
-        x = self.pos_drop(x)
-        x_downsample = []
-        v_values_1 = []
-        k_values_1 = []
-        q_values_1 = []
-        v_values_2 = []
-        k_values_2 = []
-        q_values_2 = []
+            x = self.patch_embed(x)
+            x = self.pos_drop(x)
+            x_downsample = []
+            v_values_1 = []
+            k_values_1 = []
+            q_values_1 = []
+            v_values_2 = []
+            k_values_2 = []
+            q_values_2 = []
 
-        for i, layer in enumerate(self.down):
-            x_downsample.append(x)
-            x, v1, k1, q1, v2, k2, q2 = layer(x, i)
-            v_values_1.append(v1)
-            k_values_1.append(k1)
-            q_values_1.append(q1)
-            v_values_2.append(v2)
-            k_values_2.append(k2)
-            q_values_2.append(q2)
+            for i, layer in enumerate(self.down):
+                x_downsample.append(x)
+                x, v1, k1, q1, v2, k2, q2 = layer(x, i)
+                v_values_1.append(v1)
+                k_values_1.append(k1)
+                q_values_1.append(q1)
+                v_values_2.append(v2)
+                k_values_2.append(k2)
+                q_values_2.append(q2)
 
-        x = rearrange(x, 'n c d h w -> n d h w c')
-        x = self.norm(x)
-        x = rearrange(x, 'n d h w c -> n c d h w')
-        return x, x_downsample, v_values_1, k_values_1, q_values_1, v_values_2, k_values_2, q_values_2
+            x = rearrange(x, 'n c d h w -> n d h w c')
+            x = self.norm(x)
+            x = rearrange(x, 'n d h w c -> n c d h w')
+            return x, x_downsample, v_values_1, k_values_1, q_values_1, v_values_2, k_values_2, q_values_2
 
 class upsample(nn.Module):
 
@@ -827,6 +827,8 @@ class upsample(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
         self.up = nn.Sequential()
         self.concat_back_dim = nn.Sequential()
+        self.batchconv = nn.ModuleList()
+        self.batchconv_style = nn.ModuleList()
         for n, depth, heads in zip(range(len(depths)), depths, num_heads):
             len_depths = len(depths)-1
             if n == 0:
@@ -861,6 +863,14 @@ class upsample(nn.Module):
                                                 norm_layer=norm_layer),
                     use_checkpoint=use_checkpoint)
                 )
+                
+                self.batchconv.append(batchconv(int(embed_dim * 2 ** (len_depths - n)), 
+                                                    int(embed_dim * 2 ** (len_depths - n)), 
+                                                    1))
+                self.batchconv_style.append(batchconvstyle(int(embed_dim * 2 ** (len_depths - n)), 
+                                                            int(embed_dim * 2 ** (len_depths - n)), 
+                                                            int(embed_dim * 2 ** (len_depths - 1)), 1, 
+                                                            conv_3D=True))
         self.norm_up = norm_layer(embed_dim//2)
 
 
@@ -870,6 +880,11 @@ class upsample(nn.Module):
             if inx == 0:
                 x = layer_up(x)
             else:
+                # print("style", style.shape)
+                # print("x", x.shape)
+                # print("inx-1", inx-1)
+                # print("x_downsample", x_downsample[::-1][inx-1].shape)
+                # x *= style.view(style.shape + (1, 1, 1))
                 x = torch.cat([x, x_downsample[::-1][inx-1]], 1)
                 B, C, D, H, W = x.shape
                 x = x.flatten(2).transpose(1, 2)
@@ -881,7 +896,7 @@ class upsample(nn.Module):
                 
                 # x = self.batchconv_style[inx-1](style = style, 
                 #                                 x = self.batchconv[inx-1](x), 
-                #                                 y=x_downsample[3 - inx])
+                #                                 y = x_downsample[::-1][inx-1])
                 x = layer_up(x, 
                              prev_x = x_downsample[::-1][inx-1],
                              prev_v1 = v_values_1[::-1][inx-1], 
@@ -1044,10 +1059,11 @@ class Transformer(nn.Module):
             
     def __init__(self, 
                  nbase = [32, 64, 128, 256], 
-                 nout = 3, sz = 3, 
+                 nout = 3, 
+                 sz = 1, 
                  mkldnn=False, 
                  conv_3D=True, 
-                 max_pool=True,
+                 max_pool=False,
                  diam_mean=30.,
                  embed_dim=48, 
                  encoder="mit_b5", 
@@ -1056,16 +1072,16 @@ class Transformer(nn.Module):
         super().__init__()
         self.nbase = nbase
         self.nout = nout
-        self.sz = 1
+        self.sz = sz
         self.embed_dim = embed_dim
         self.residual_on = True
         self.style_on = True
         self.concatenation = False
         self.conv_3D = conv_3D
-        self.mkldnn = mkldnn if mkldnn is not None else False
+        self.mkldnn = False
         norm_layer=nn.LayerNorm
         self.patch_norm=True
-        self.patch_embed = PatchEmbed3D(norm_layer=norm_layer if self.patch_norm else None)
+        self.patch_embed = PatchEmbed3D(norm_layer=norm_layer if self.patch_norm else None, embed_dim = embed_dim)
         drop_rate=0.25
         self.pos_drop = nn.Dropout(p=drop_rate)
         self.downsample = downsample(nbase, 
@@ -1075,7 +1091,8 @@ class Transformer(nn.Module):
                                      embed_dim = embed_dim)
         nbaseup = nbase[1:]
         nbaseup.append(nbaseup[-1])
-        self.upsample = upsample(nbaseup)
+        self.upsample = upsample(nbaseup,
+                                     embed_dim = embed_dim)
         self.make_style = make_style(conv_3D=conv_3D)
         
         # self.output = nn.Conv3d(in_channels=embed_dim, out_channels=self.num_classes, kernel_size=1, bias=False)
@@ -1123,7 +1140,10 @@ class Transformer(nn.Module):
         B, C, H, W = data.shape
         # add the embedding dimension
         data = data.unsqueeze(1)
+        
+        
         T0 = self.downsample(data)
+        
         (x, x_downsample, v_values_1, k_values_1, q_values_1, v_values_2, k_values_2, q_values_2) = T0
         if self.mkldnn:
             style = self.make_style(x_downsample[-1].to_dense())
@@ -1138,6 +1158,7 @@ class Transformer(nn.Module):
         T1 = self.last_up(T1)
         T1 = T1.view(B, self.embed_dim, -1, H, W)
         T1 = self.DeepSet_act(self.output(T1))
+        
         # x = self.output(x)
         T1 = self.DeepSet_act(self.DeepSet1(T1))
         # x = self.find_largest_abs_positions(x)

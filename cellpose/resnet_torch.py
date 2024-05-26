@@ -138,6 +138,7 @@ class make_style(nn.Module):
         self.avg_pool = F.avg_pool3d if conv_3D else F.avg_pool2d
 
     def forward(self, x0):
+        print(x0.shape)
         style = self.avg_pool(x0, kernel_size=x0.shape[2:])
         style = self.flatten(style)
         style = style / torch.sum(style**2, axis=1, keepdim=True)**.5
@@ -238,6 +239,8 @@ class CPnet(nn.Module):
         Returns:
             tuple: A tuple containing the output tensor, style tensor, and downsampled tensors.
         """
+        print("WRONG MODEL")
+        exit()
         if self.mkldnn:
             data = data.to_mkldnn()
         T0 = self.downsample(data)

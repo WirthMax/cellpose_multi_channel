@@ -312,7 +312,7 @@ class CellposeModel():
             self.net = CPnet(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
                              max_pool=True, diam_mean=diam_mean).to(self.device)
         else:
-            from .segformer import Transformer
+            from .segformerv2 import Transformer
             self.net = Transformer(
                 encoder_weights="imagenet" if not self.pretrained_model else None,
                 diam_mean=diam_mean).to(self.device)

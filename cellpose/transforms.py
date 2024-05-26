@@ -799,10 +799,17 @@ def random_rotate_and_resize(X, Y=None, scale_range=1., xy=(224, 224), do_3D=Fal
     """
     scale_range = max(0, min(2, float(scale_range)))
     nimg = len(X)
-    if X[0].ndim > 2:
-        nchan = X[0].shape[0]
-    else:
-        nchan = 1
+    
+    nchan = [x.shape[0] for x in X]
+    
+    # if not all images have the same number of channels:
+    # change and make sure every image is the same dimensionality by subsampling
+    min_chans = min(nchan)
+    if not all(x == min_chans for x in nchan):
+        np.random.permutation(10)
+        X = [x[np.random.permutation(x.shape[0])[:min_chans]] for x in X]
+    nchan = min_chans
+    
     if do_3D and X[0].ndim > 3:
         shape = (X[0].shape[-3], xy[0], xy[1])
     else:
