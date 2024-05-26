@@ -29,9 +29,6 @@ def plot_grad_flow(named_parameters):
     for n, p in named_parameters:
         if(p.requires_grad) and ("bias" not in n):
             layers.append(n)
-            print("SCHINKEN", n)
-            print(p.is_leaf)
-            print(p.grad)
             ave_grads.append(p.grad.abs().mean())
     ave_grads = [a.cpu().detach().numpy() for a in ave_grads]
     plt.plot(ave_grads, alpha=0.3, color="b")
@@ -90,11 +87,12 @@ def _loss_fn_seg(lbl, y, device):
     """
     criterion = nn.MSELoss(reduction="mean")
     criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
-    veci = torch.from_numpy(lbl[:, 1:]).to(device) * 5.
+    veci = lbl[:, 1:] * 5.
+    # veci = torch.from_numpy(lbl[:, 1:]).to(device) * 5.
     loss1 = criterion(y[:, :2], veci)
     loss1 /= 2.
-    # loss2 = criterion2(y[:, -1], torch.from_numpy(lbl[:, 0] > 0.5).to(device).float())
-    loss2 = criterion2(y[:, 2], torch.from_numpy(lbl[:, 0]).to(device).float())
+    # loss2 = criterion2(y[:, 2], torch.from_numpy(lbl[:, 0]).to(device).float())
+    loss2 = criterion2(y[:, 2], lbl[:, 0])
     loss = loss1 + loss2
     return loss, loss1, loss2
 
@@ -388,7 +386,7 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
               train_labels_files=None, train_probs=None, test_data=None,
               test_labels=None, test_files=None, test_labels_files=None,
               test_probs=None, load_files=True, batch_size=8, learning_rate=0.005,
-              n_epochs=2000, weight_decay=1e-5, momentum=0.9, SGD=False, channels=None,
+              n_epochs=2000, weight_decay=0.05, momentum=0.9, SGD=False, channels=None,
               channel_axis=None, rgb=False, normalize=True, compute_flows=False,
               save_path=None, save_every=100, nimg_per_epoch=None,
               nimg_test_per_epoch=None, rescale=True, scale_range=None, bsize=448,
@@ -554,26 +552,25 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
             # Set the right half of the image to zeros (white)
             imgi[:, :, :, 224:] = 0
             
-            lbl = np.array(labels_to_flows([imgi[:, 0].astype(np.uint16)]))[:, 1:]
+            lbl = np.array(labels_to_flows([imgi[:, 0].astype(np.int16)])).astype(np.float16)[:, 1:]
             
             
-            
+
             
             # normalisierung
             imgi = imgi.astype(np.float32)
-            imgi = (imgi-np.min(imgi, axis=(2, 3), keepdims=True))/(np.max(imgi, axis=(2, 3), keepdims=True)-np.min(imgi, axis=(2, 3), keepdims=True))*255.
+            imgi = (imgi-np.min(imgi, axis=(2, 3), keepdims=True))/(np.max(imgi, axis=(2, 3), keepdims=True)-np.min(imgi, axis=(2, 3), keepdims=True))
             
-            X = torch.from_numpy(imgi).to(device)
+            X = torch.from_numpy(imgi).float().to(device)
+            lbl = torch.from_numpy(lbl).float().to(device)
             y = net(X)[0]
-            print(y.min())
-            print(y.max())
-            print(y.mean())
             loss, train_MSELoss,train_BCE_loss = _loss_fn_seg(lbl, y, device)
-            train_MSELoss,train_BCE_loss = train_MSELoss.item(),train_BCE_loss.item()
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), 5.0)
             optimizer.step()
 
+            train_MSELoss,train_BCE_loss = train_MSELoss.item(),train_BCE_loss.item()
             train_loss = loss.item()
             train_loss *= len(imgi)
             lavg += train_loss
@@ -589,11 +586,11 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
 
         if iepoch == 5 or iepoch % 10 == 0:
             
-            if iepoch == 5:
+            if iepoch == 20:
                 plot_grad_flow_v2(net.named_parameters()) # version 2
         
             output = y[0].cpu().detach().numpy()
-            label = lbl[0]
+            label = lbl[0].cpu().detach().numpy()
             image_train = X[0].cpu().detach().numpy()
             
             for name, param in net.named_parameters():
@@ -658,7 +655,8 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
                         imgi, lbl = transforms.random_rotate_and_resize(
                             imgs, Y=lbls, rescale=rsc, scale_range=scale_range,
                             xy=(bsize, bsize))[:2]
-                        X = torch.from_numpy(imgi).to(device)
+                        X = torch.from_numpy(imgi).float().to(device)
+                        lbl = torch.from_numpy(lbl).float().to(device)
                         y = net(X)[0]
                         loss, test_MSELoss,test_BCE_loss  = _loss_fn_seg(lbl, y, device)
                         test_loss, test_MSELoss,test_BCE_loss = loss.item(), test_MSELoss.item(),test_BCE_loss.item()
@@ -669,7 +667,7 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
                 
                 output = y[0].cpu().detach().numpy()
                 image_test = X[0].cpu().detach().numpy()
-                label = lbl[0]
+                label = lbl[0].cpu().detach().numpy()
                 
                 
                 cellprob = output[2]
