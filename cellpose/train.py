@@ -546,13 +546,13 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
                                                             xy=(bsize, bsize))[:2]
             
             
-            # Create a tensor of ones (black) with the desired shape
-            imgi = np.ones((1, 7, 448, 448))
+            # # Create a tensor of ones (black) with the desired shape
+            # imgi = np.ones((1, 7, 448, 448))
 
-            # Set the right half of the image to zeros (white)
-            imgi[:, :, :, 224:] = 0
+            # # Set the right half of the image to zeros (white)
+            # imgi[:, :, :, 224:] = 0
             
-            lbl = np.array(labels_to_flows([imgi[:, 0].astype(np.int16)])).astype(np.float16)[:, 1:]
+            # lbl = np.array(labels_to_flows([imgi[:, 0].astype(np.int16)])).astype(np.float16)[:, 1:]
             
             
 
