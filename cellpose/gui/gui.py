@@ -23,6 +23,7 @@ from ..transforms import resize_image, normalize99, normalize99_tile, smooth_sha
 from ..models import normalize_default
 from ..plot import disk
 from colordict import ColorDict
+import random
 
 
 try:
@@ -352,9 +353,10 @@ class MainW(QMainWindow):
         self.cd = ColorDict(palettes=['fluorescent'])
         self.color_dict = {}
         for i, value in enumerate(self.cd.values()):
-            self.color_dict[f"chan{i+1}"] =  value
+            self.color_dict[f"chan{i+1}"] =  value[:3]
         del self.cd
         self.color_names = list(self.color_dict.keys())
+        random.Random(10).shuffle(self.color_names)
         self.color_dict["All"] = [255, 255, 255]
         self.color_dict["gray"] = [193, 193, 193]
         self.color_dict["spectral"] = [19, 132, 245]
@@ -442,7 +444,6 @@ class MainW(QMainWindow):
         for i in range(3):
             self.cmap.append(
                 make_cmap(i).getLookupTable(start=0.0, stop=255.0, alpha=False))
-
         if MATPLOTLIB:
             self.colormap = (plt.get_cmap("gist_ncar")(np.linspace(0.0, .9, 1000000)) *
                              255).astype(np.uint8)
@@ -504,6 +505,7 @@ class MainW(QMainWindow):
                 self.color_dict[f"chan{i+1}"] =  value
             del self.cd
             self.color_names = list(self.color_dict.keys())
+            random.Random(0).shuffle(self.color_names)
             self.color_dict["All"] = [255, 255, 255]
             self.color_dict["gray"] = [193, 193, 193]
             self.color_dict["spectral"] = [19, 132, 245]
@@ -1903,9 +1905,7 @@ class MainW(QMainWindow):
                 # show single channel
                 image = image[..., 0]
             if self.color[0] == 1:
-                print("gray")
                 if self.nchan > 1:
-                    print("calculating mean of image channelwise")
                     image = image.mean(axis=-1)
                 # apply scaling
                 min_v = self.saturation[1][self.currentZ][0]
@@ -1913,9 +1913,7 @@ class MainW(QMainWindow):
                 image = (np.clip(image, min_v, max_v) - min_v) * (1 / (max_v - min_v))
                 self.img.setImage(image, autoLevels=False, lut=None)
             elif self.color[0] == 2:
-                print("spectral")
                 if self.nchan > 1:
-                    print("calculating mean of image channelwise")
                     image = image.mean(axis=-1)
                 # apply scaling
                 min_v = self.saturation[1][self.currentZ][0]
@@ -1925,7 +1923,6 @@ class MainW(QMainWindow):
                 
             # show individual channel image or RGB
             else:
-                print("RGB or ind channels")
                 All_levels = False
                 if self.color[0] == 0:
                     self.color = list(range(3, len(list(self.metainf.keys()))+3))
@@ -1943,21 +1940,19 @@ class MainW(QMainWindow):
                         img = (np.clip(chan_img, min_v, max_v) - min_v) * (1 / (max_v - min_v))        
                     else:
                         img += (np.clip(chan_img, min_v, max_v) - min_v) * (1 / (max_v - min_v))  
-                    img = (img-np.min(img))/(np.max(img)-np.min(img))
-                    self.img.setImage(img)
+                img = (((img-np.min(img))/(np.max(img)-np.min(img)))*255).astype(np.uint16)
+                self.img.setImage(img, autolevels = False, levels = [0.0, 255.0])
                     
         else:
             image = np.zeros((self.Ly, self.Lx), np.uint8)
             if len(self.flows) >= self.view - 1 and len(self.flows[self.view - 1]) > 0:
                 image = self.flows[self.view - 1][self.currentZ]
             if self.view > 1:
-                print("Cellprob")
                 self.img.setImage(image, autoLevels=False, lut=self.bwr)
                 self.img.setLevels([0.0, 255.0])
                 # self.img.setImage(image, autoLevels=False, lut=self.bwr)
                 
             else:
-                print("GradXY")
                 self.img.setImage(image, autoLevels=False, lut=None)
                 self.img.setLevels([0.0, 255.0])
                 
