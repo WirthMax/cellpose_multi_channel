@@ -970,6 +970,7 @@ class Transformer(nn.Module):
         
         self.mkldnn = mkldnn
         self.pos_drop = nn.Dropout(p=drop_rate)
+        self.nout = nout
         
         norm_layer=nn.LayerNorm
         
@@ -1291,8 +1292,7 @@ class Transformer(nn.Module):
         if (device is not None) and (device.type != "cpu"):
             state_dict = torch.load(filename, map_location=device)
         else:
-            self.__init__(self.nbase, self.nout, self.sz, self.mkldnn, self.conv_3D,
-                          self.diam_mean)
+            self.__init__(mkldnn = self.mkldnn, diam_mean = self.diam_mean)
             state_dict = torch.load(filename, map_location=torch.device("cpu"))
         
         self.load_state_dict(

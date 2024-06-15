@@ -26,7 +26,8 @@ MODEL_NAMES = [
     "cyto3", "nuclei", "cyto2_cp3", "tissuenet_cp3", "livecell_cp3", "yeast_PhC_cp3",
     "yeast_BF_cp3", "bact_phase_cp3", "bact_fluor_cp3", "deepbacs_cp3", "cyto2", "cyto",
     "transformer_cp3", "neurips_cellpose_default", "neurips_cellpose_transformer",
-    "neurips_grayscale_cyto2"
+    "neurips_grayscale_cyto2",
+    "multiplex"
 ]
 
 MODEL_LIST_PATH = os.fspath(MODEL_DIR.joinpath("gui_models.txt"))
@@ -312,15 +313,23 @@ class CellposeModel():
             self.net = CPnet(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
                              max_pool=True, diam_mean=diam_mean).to(self.device)
         else:
+            print("Using transformer")
             from .segformerv2 import Transformer
-            self.net = Transformer(
-                encoder_weights="imagenet" if not self.pretrained_model else None,
-                diam_mean=diam_mean).to(self.device)
+            self.net = Transformer(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
+                             max_pool=True, diam_mean=diam_mean).to(self.device)
 
         ### load model weights
         if self.pretrained_model:
             models_logger.info(f">>>> loading model {pretrained_model}")
-            self.net.load_model(self.pretrained_model, device=self.device)
+            try:
+                self.net.load_model(self.pretrained_model, device=self.device)
+            except KeyError:    
+                print("Using transformer")
+                from .segformerv2 import Transformer
+                self.net = Transformer(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
+                                max_pool=True, diam_mean=diam_mean).to(self.device)
+                self.net.load_model(self.pretrained_model, device=self.device)
+                
             if not builtin:
                 self.diam_mean = self.net.diam_mean.data.cpu().numpy()[0]
             self.diam_labels = self.net.diam_labels.data.cpu().numpy()[0]
