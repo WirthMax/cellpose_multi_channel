@@ -350,7 +350,7 @@ class CellposeModel():
              z_axis=None, normalize=True, invert=False, rescale=None, diameter=None,
              flow_threshold=0.4, cellprob_threshold=0.0, do_3D=False, anisotropy=None,
              stitch_threshold=0.0, min_size=15, niter=None, augment=False, tile=True,
-             tile_overlap=0.1, bsize=224, interp=True, compute_masks=True,
+             tile_overlap=0.1, bsize=448, interp=True, compute_masks=True,
              progress=None):
         """ segment list of images x, or 4D array - Z x nchan x Y x X
 
@@ -441,10 +441,16 @@ class CellposeModel():
 
         else:
             # reshape image
-            x = transforms.convert_image(x, channels, channel_axis=channel_axis,
-                                         z_axis=z_axis, do_3D=(do_3D or
-                                                               stitch_threshold > 0),
-                                         nchan=self.nchan)
+            if self.net.model_string != "Transformer":
+            	x = transforms.convert_image(x, channels, channel_axis=channel_axis,
+                     	                    z_axis=z_axis, do_3D=(do_3D or
+                     	                                          stitch_threshold > 0),
+                    	                     nchan=self.nchan)
+            else:
+            	x = transforms.convert_image(x, None, channel_axis=channel_axis,
+                     	                    z_axis=z_axis, do_3D=(do_3D or
+                     	                                          stitch_threshold > 0),
+                    	                     nchan=x.shape[-1])
             if x.ndim < 4:
                 x = x[np.newaxis, ...]
             self.batch_size = batch_size
@@ -468,7 +474,7 @@ class CellposeModel():
 
     def _run_cp(self, x, compute_masks=True, normalize=True, invert=False, niter=None,
                 rescale=1.0, resample=True, augment=False, tile=True, tile_overlap=0.1,
-                cellprob_threshold=0.0, bsize=224, flow_threshold=0.4, min_size=15,
+                cellprob_threshold=0.0, bsize=448, flow_threshold=0.4, min_size=15,
                 interp=True, anisotropy=1.0, do_3D=False, stitch_threshold=0.0):
 
         if isinstance(normalize, dict):
@@ -509,7 +515,7 @@ class CellposeModel():
             tqdm_out = utils.TqdmToLogger(models_logger, level=logging.INFO)
             iterator = trange(nimg, file=tqdm_out,
                               mininterval=30) if nimg > 1 else range(nimg)
-            styles = np.zeros((nimg, self.nbase[-1]), np.float32)
+            styles = np.zeros((nimg, self.net.nbase[-1]), np.float32)
             if resample:
                 dP = np.zeros((2, nimg, shape[1], shape[2]), np.float32)
                 cellprob = np.zeros((nimg, shape[1], shape[2]), np.float32)
@@ -524,7 +530,7 @@ class CellposeModel():
                 img = np.asarray(x[i])
                 if do_normalization:
                     img = transforms.normalize_img(img, **normalize_params)
-                if rescale != 1.0:
+                if rescale != 1.0 and self.net.model_string != "Transformer":
                     img = transforms.resize_image(img, rsz=rescale)
                 yf, style = run_net(self.net, img, bsize=bsize, augment=augment,
                                     tile=tile, tile_overlap=tile_overlap)

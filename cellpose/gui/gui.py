@@ -2711,18 +2711,17 @@ class MainW(QMainWindow):
             niter = max(0, int(self.niter.text()))
             niter = None if niter == 0 else niter
             normalize_params = self.get_normalize_params()
-            print(normalize_params)
             try:
-                masks, flows = self.model.eval(
-                    data, channels=channels, diameter=self.diameter,
-                    cellprob_threshold=cellprob_threshold,
-                    flow_threshold=flow_threshold, do_3D=do_3D, niter=niter,
-                    normalize=normalize_params, stitch_threshold=stitch_threshold,
-                    progress=self.progress)[:2]
+            	masks, flows = self.model.eval(
+		    data, channels=channels, diameter=self.diameter,
+		    cellprob_threshold=cellprob_threshold,
+		    flow_threshold=flow_threshold, do_3D=do_3D, niter=niter,
+		    normalize=normalize_params, stitch_threshold=stitch_threshold,
+		    progress=self.progress)[:2]
             except Exception as e:
-                print("NET ERROR: %s" % e)
-                self.progress.setValue(0)
-                return
+            	print("NET ERROR: %s" % e)
+            	self.progress.setValue(0)
+            	return
 
             self.progress.setValue(75)
 

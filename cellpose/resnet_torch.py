@@ -217,6 +217,8 @@ class CPnet(nn.Module):
                                       requires_grad=False)
         self.diam_labels = nn.Parameter(data=torch.ones(1) * diam_mean,
                                         requires_grad=False)
+                                        
+        self.model_string = "CPnet"
 
     @property
     def device(self):

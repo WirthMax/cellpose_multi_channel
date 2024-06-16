@@ -516,9 +516,11 @@ def train_seg(net, train_data=None, train_labels=None, train_files=None,
     train_logger.info(f">>> saving model to {model_path}")
     
     import torchinfo
+    net.eval()
     print(torchinfo.summary(net,(1, 7, 448, 448), col_names = ["input_size",
                 "output_size", "num_params", "params_percent", 
                 "kernel_size", "mult_adds"], verbose = 0))
+    exit()
 
     lavg, lavgMSE, lavgBCE, nsum = 0, 0, 0, 0 
     for iepoch in range(n_epochs):

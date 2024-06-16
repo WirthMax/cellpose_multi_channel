@@ -939,7 +939,7 @@ class Transformer(nn.Module):
     """     
             
     def __init__(self, 
-                 nbase = [32, 64, 128, 256], 
+                 nbase = [96, 192, 384, 768], 
                  nout = 3, 
                  sz = 1,
                  mkldnn=False, 
@@ -967,7 +967,7 @@ class Transformer(nn.Module):
                  decoder="MAnet",
                  patch_norm=True):
         super().__init__()
-        
+        self.nbase = [96, 192, 384, 768]
         self.mkldnn = mkldnn
         self.pos_drop = nn.Dropout(p=drop_rate)
         self.nout = nout
@@ -1242,15 +1242,11 @@ class Transformer(nn.Module):
         B, C, H, W = X.shape
         # add the embedding dimension
         X = X.unsqueeze(1)
-        # print("INPUT: ", X.shape, X.min(), X.max(), X.mean())
         
         # Patch Embed
         X = self.patch_embed(X)
-        # print("PATCH EMBEDDING: ", X.shape, X.min(), X.max(), X.mean())
-        # Downsample
         out = self.downsample(X)
         (X, x_downsample, v_values_1, k_values_1, q_values_1, v_values_2, k_values_2, q_values_2) = out
-        # print("DOWNSAMPLING: ", X.shape, X.min(), X.max(), X.mean())
         # Calculate style as global average pool of each feature map
         if self.mkldnn:
             style = self.make_style(x_downsample[-1].to_dense())
@@ -1261,10 +1257,7 @@ class Transformer(nn.Module):
         X = self.upsample(style, X, x_downsample, v_values_1, k_values_1, q_values_1, v_values_2, k_values_2,
                             q_values_2)
     
-        # print("UPSAMPLING: ", X.shape, X.min(), X.max(), X.mean())
-        
         X = self.output(X)
-        # print("OUTPUT: ", X.shape, X.min(), X.max(), X.mean())
         
         if self.mkldnn:
             x_downsample = [t0.to_dense() for t0 in x_downsample]
@@ -1292,7 +1285,8 @@ class Transformer(nn.Module):
         if (device is not None) and (device.type != "cpu"):
             state_dict = torch.load(filename, map_location=device)
         else:
-            self.__init__(mkldnn = self.mkldnn, diam_mean = self.diam_mean)
+            self.__init__(self.nbase, self.nclasses, sz = 3, mkldnn = self.mkldnn,
+            			max_pool = True, diam_mean = self.diam_mean).to(self.device)
             state_dict = torch.load(filename, map_location=torch.device("cpu"))
         
         self.load_state_dict(
