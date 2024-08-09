@@ -502,7 +502,7 @@ class MainW(QMainWindow):
             self.cd = ColorDict()
             self.color_dict = {}
             for i, value in enumerate(self.cd.values()):
-                self.color_dict[f"chan{i+1}"] =  value
+                self.color_dict[f"chan{i+1}"] =  value[:3]
             del self.cd
             self.color_names = list(self.color_dict.keys())
             random.Random(0).shuffle(self.color_names)
@@ -1288,7 +1288,6 @@ class MainW(QMainWindow):
         self.SizeButton.setEnabled(True)
         self.newmodel.setEnabled(True)
         self.loadMasks.setEnabled(True)
-
         for n in range(self.nchan):
             self.sliders[n].setEnabled(True)
         for n in range(self.nchan, 3):
@@ -1910,7 +1909,7 @@ class MainW(QMainWindow):
                 # apply scaling
                 min_v = self.saturation[1][self.currentZ][0]
                 max_v = self.saturation[1][self.currentZ][1]
-                image = (np.clip(image, min_v, max_v) - min_v) * (1 / (max_v - min_v))
+                image = (np.clip(image, min_v, max_v) - min_v) * (255 / (max_v - min_v))
                 self.img.setImage(image, autoLevels=False, lut=None)
             elif self.color[0] == 2:
                 if self.nchan > 1:
@@ -1918,28 +1917,29 @@ class MainW(QMainWindow):
                 # apply scaling
                 min_v = self.saturation[1][self.currentZ][0]
                 max_v = self.saturation[1][self.currentZ][1]
-                image = (np.clip(image, min_v, max_v) - min_v) * (1 / (max_v - min_v))
+                image = (np.clip(image, min_v, max_v) - min_v) * (255 / (max_v - min_v))
                 self.img.setImage(image, autoLevels=False, lut=self.cmap[0])
                 
             # show individual channel image or RGB
             else:
                 All_levels = False
                 if self.color[0] == 0:
-                    self.color = list(range(3, len(list(self.metainf.keys()))+3))
+                    color = list(range(3, len(list(self.metainf.keys()))+3))
                     All_levels = True
-                for i, ind in enumerate(self.color):
-                    if All_levels:
-                        min_v = self.saturation[0][self.currentZ][0]
-                        max_v = self.saturation[0][self.currentZ][1]
-                    else:
-                        min_v = self.saturation[ind][self.currentZ][0]
-                        max_v = self.saturation[ind][self.currentZ][1]
-                    chan_img = self._plot_different_markers(ind, image)*np.max(image)
-                    # apply scaling
-                    if i == 0:
-                        img = (np.clip(chan_img, min_v, max_v) - min_v) * (1 / (max_v - min_v))        
-                    else:
-                        img += (np.clip(chan_img, min_v, max_v) - min_v) * (1 / (max_v - min_v))  
+                else:
+                    color = self.color
+                col = np.array([self.color_dict[self.color_names[color]] for color in color])    
+                chans = [c-3 for c in color]
+                img = image[:,:,chans]
+                if All_levels:
+                    min_v = np.array(self.saturation[0][self.currentZ][0])
+                    max_v = np.array(self.saturation[0][self.currentZ][1])
+                else:
+                    sat = [self.saturation[ind+3][self.currentZ] for ind in chans]
+                    min_v = np.array([x[0] for x in sat])
+                    max_v = np.array([x[1] for x in sat])
+                img = (np.clip(img, min_v, max_v) - min_v) * (255 / (max_v - min_v))  
+                img = img@col 
                 img = (((img-np.min(img))/(np.max(img)-np.min(img)))*255).astype(np.uint16)
                 self.img.setImage(img, autolevels = False, levels = [0.0, 255.0])
                     
@@ -2141,7 +2141,6 @@ class MainW(QMainWindow):
                     self.cellpix = self.cellpix_orig.copy()
                     self.outpix = self.outpix_orig.copy()
 
-        #print(self.cellpix.shape, self.outpix.shape, self.cellpix.max(), self.outpix.max())
         self.layerz = np.zeros((self.Ly, self.Lx, 4), np.uint8)
         if self.masksOn:
             self.layerz[..., :3] = self.cellcolors[self.cellpix[self.currentZ], :]
@@ -2343,8 +2342,8 @@ class MainW(QMainWindow):
                 for n in range(self.NZ):
                     self.saturation[-1].append([0, 255.])
         # if only 2 restore channels, add blue
-        if len(self.saturation) < 3:
-            for i in range(3 - len(self.saturation)):
+        if len(self.saturation) < self.nchan:
+            for i in range(self.nchan - len(self.saturation)):
                 self.saturation.append([])
                 for n in range(self.NZ):
                     self.saturation[-1].append([0, 255.])
@@ -2712,17 +2711,25 @@ class MainW(QMainWindow):
             niter = None if niter == 0 else niter
             normalize_params = self.get_normalize_params()
             try:
-            	masks, flows = self.model.eval(
-		    data, channels=channels, diameter=self.diameter,
-		    cellprob_threshold=cellprob_threshold,
-		    flow_threshold=flow_threshold, do_3D=do_3D, niter=niter,
-		    normalize=normalize_params, stitch_threshold=stitch_threshold,
-		    progress=self.progress)[:2]
+                masks, flows = self.model.eval(
+                    data, channels=channels, diameter=self.diameter,
+                    cellprob_threshold=cellprob_threshold,
+                    flow_threshold=flow_threshold, do_3D=do_3D, niter=niter,
+                    normalize=normalize_params, stitch_threshold=stitch_threshold,
+                    progress=self.progress)[:2]
             except Exception as e:
-            	print("NET ERROR: %s" % e)
-            	self.progress.setValue(0)
-            	return
-
+                print("NET ERROR: %s" % e)
+                self.progress.setValue(0)
+                return
+            from PIL import Image
+            from matplotlib import cm
+            print(len(flows))
+            print(flows[0].shape)
+            im = Image.fromarray(np.uint8(cm.bwr(flows[0] + 0.5)*255))
+            im.save("/Users/maximilianwirth/Documents/Uni_Tuebingen/WiSe2324/Master_thesis_wirth/Defense/Y_flows.png")
+            im = Image.fromarray(np.uint8(cm.bwr(flows[1] + 0.5)*255))
+            im.save("/Users/maximilianwirth/Documents/Uni_Tuebingen/WiSe2324/Master_thesis_wirth/Defense/Y_flows.png")
+            
             self.progress.setValue(75)
 
             # convert flows to uint8 and resize to original image size

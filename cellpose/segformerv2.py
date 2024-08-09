@@ -1285,8 +1285,7 @@ class Transformer(nn.Module):
         if (device is not None) and (device.type != "cpu"):
             state_dict = torch.load(filename, map_location=device)
         else:
-            self.__init__(self.nbase, self.nclasses, sz = 3, mkldnn = self.mkldnn,
-            			max_pool = True, diam_mean = self.diam_mean).to(self.device)
+            self.__init__(mkldnn = self.mkldnn, max_pool = True, diam_mean = self.diam_mean)#.to(self.device)
             state_dict = torch.load(filename, map_location=torch.device("cpu"))
         
         self.load_state_dict(
