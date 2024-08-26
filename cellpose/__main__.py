@@ -6,7 +6,7 @@ import sys, os, glob, pathlib, time
 import numpy as np
 from natsort import natsorted
 from tqdm import tqdm
-from cellpose import utils, models, io, version_str, train, denoise
+from cellpose import utils, models, io, version_str, train, pretrain, denoise
 from cellpose.cli import get_arg_parser
 
 try:
@@ -250,7 +250,7 @@ def main():
                 output = io.load_train_test_data(args.dir, test_dir, imf,
                                                  args.mask_filter,
                                                  args.look_one_level_down)
-                images, labels, image_names, test_images, test_labels, image_names_test = output
+                images, metainf, labels, image_names, test_images, metainf_test, test_labels, test_image_names = output
                 load_files = True
 
             # training with all channels
@@ -287,7 +287,8 @@ def main():
             # train segmentation model
             if args.train:
                 cpmodel_path = train.train_seg(
-                    model.net, images, labels, train_files=image_names,
+                    model.net, images, labels, metainf = metainf, 
+                    metainf_test = metainf_test, train_files=image_names,
                     test_data=test_images, test_labels=test_labels,
                     test_files=image_names_test, train_probs=train_probs,
                     test_probs=test_probs, compute_flows=compute_flows,

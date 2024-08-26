@@ -1,7 +1,6 @@
-import json
+from ast import Name
 import time
 import os
-import io as sys_IO
 import numpy as np
 from cellpose import io, transforms, utils, models, dynamics, metrics, resnet_torch
 from cellpose.transforms import normalize_img
@@ -9,10 +8,13 @@ from pathlib import Path
 import torch
 from torch import nn
 from tqdm import trange
-from numba import prange
 from matplotlib import cm
 import matplotlib.pyplot as plt
 torch.autograd.set_detect_anomaly(True)
+from torchviz import make_dot
+import cv2
+import json
+import random
 
 from .dynamics import labels_to_flows
 
@@ -45,33 +47,7 @@ def plot_grad_flow(named_parameters):
     plt.title("Gradient flow")
     plt.legend([plt.Line2D([0], [0], color="c", lw=4),
                 plt.Line2D([0], [0], color="b", lw=4)],['max-gradient', 'mean-gradient'])
-    plt.savefig("/mnt/volume/Vol_b/Cell_seg_max/data/gradient_plot.pdf")
-    
-def plot_grad_flow_tb(named_parameters, plt):
-    ave_grads = []
-    max_grads = []
-    layers = []
-    for n, p in named_parameters:
-        if(p.requires_grad) and ("bias" not in n):
-            try:
-                layers.append(n)
-                ave_grads.append(p.grad.abs().mean())
-                max_grads.append(p.grad.abs().max())
-            except:
-                print(n)
-    ave_grads = [a.cpu().detach().numpy() for a in ave_grads]
-    max_grads = [a.cpu().detach().numpy() for a in max_grads]
-    # fig = plt.figure()
-    plt.plot(np.arange(len(max_grads)),max_grads, alpha=0.1, color="#FF5722")
-    plt.bar(np.arange(len(ave_grads)),ave_grads, alpha=0.5, color="#03A9F4")
-    io_buf = sys_IO.BytesIO()
-    plt.savefig(io_buf, format='raw')
-    plt.savefig("/mnt/volume/Vol_b/Cell_seg_max/data/gradient_plot.pdf", dpi = 300)
-    io_buf.seek(0)
-    img_arr = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
-                        newshape=(int(plt.gcf().bbox.bounds[3]), int(plt.gcf().bbox.bounds[2]), -1))
-    io_buf.close()
-    return plt, np.transpose(img_arr, (2, 0, 1))
+    plt.savefig("/mnt/volume/Vol_b/Cell_seg_max/data/gradient_plot_pretrain.pdf")
     
 
 def plot_grad_flow_v2(named_parameters):
@@ -85,14 +61,18 @@ def plot_grad_flow_v2(named_parameters):
     layers = []
     for n, p in named_parameters:
         if(p.requires_grad) and ("bias" not in n):
-            layers.append(n)
-            ave_grads.append(p.grad.abs().mean())
-            max_grads.append(p.grad.abs().max())
+            try:
+                layers.append(n)
+                ave_grads.append(p.grad.abs().mean())
+                max_grads.append(p.grad.abs().max())
+            except:
+                print(n)
+                
     ave_grads = [a.cpu().detach().numpy() for a in ave_grads]
     max_grads = [a.cpu().detach().numpy() for a in max_grads]
-    plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
-    plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
-    plt.hlines(0, 0, len(ave_grads)+1, lw=2, color="k" )
+    plt.hlines(0, 0, len(ave_grads)+1, lw=2, alpha=0.1, color="k" )
+    plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.9, lw=1, color="c")
+    plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.9, lw=1, color="b")
     plt.xticks(range(0,len(ave_grads), 1), layers, rotation="vertical")
     plt.xlim(left=0, right=len(ave_grads))
     plt.ylim(bottom = -0.001, top=0.02) # zoom in on the lower gradient regions
@@ -103,10 +83,10 @@ def plot_grad_flow_v2(named_parameters):
     plt.legend([plt.Line2D([0], [0], color="c", lw=4),
                 plt.Line2D([0], [0], color="b", lw=4),
                 plt.Line2D([0], [0], color="k", lw=4)], ['max-gradient', 'mean-gradient', 'zero-gradient'])
-    plt.savefig("/mnt/volume/Vol_b/Cell_seg_max/data/gradient_plot.pdf")
+    plt.savefig("/mnt/volume/Vol_b/Cell_seg_max/data/gradient_plot_pretrain.pdf")
 
 
-def _loss_fn_seg(lbl, y, device):
+def _loss_fn_seg(Y, X, chans, onehot_empty):
     """
     Calculates the loss function between true labels lbl and prediction y.
 
@@ -119,16 +99,21 @@ def _loss_fn_seg(lbl, y, device):
         torch.Tensor: Loss value.
 
     """
-    criterion = nn.MSELoss(reduction="mean")
-    criterion2 = nn.BCEWithLogitsLoss(reduction="mean")
-    veci = lbl[:, 1:] * 5.
-    # veci = torch.from_numpy(lbl[:, 1:]).to(device) * 5.
-    loss1 = criterion(y[:, :2], veci)
-    loss1 /= 2.
-    # loss2 = criterion2(y[:, 2], torch.from_numpy(lbl[:, 0]).to(device).float())
-    loss2 = criterion2(y[:, 2], lbl[:, 0])
-    loss = loss1 + loss2
-    return loss, loss1, loss2
+    # Mean Squared Error loss without reduction
+    MSE = torch.nn.MSELoss(reduction="none")
+
+    # Compute MSE loss
+    loss = MSE(X, Y)  # Shape: [2, 8, 448, 448]
+
+    # Sum over the spatial dimensions first, then apply the mask
+    spatial_sum = loss.sum(dim=[2, 3])  # Shape: [2, 8]
+
+    chan_mask = (chans!=onehot_empty).int()
+
+    # Apply the channel mask and sum over the channels
+    masked_loss = spatial_sum * chan_mask # Shape: [2, 8]
+    return masked_loss.sum()/chan_mask.sum()  # Scalar
+    
 
 
 def _get_batch(inds, data=None, labels=None, files=None, labels_files=None,
@@ -302,11 +287,11 @@ def _process_train_test(train_data=None, train_labels=None, metainf = None,
             # load all images
             train_logger.info(">>> loading images and labels")
             train_data = [io.imread(train_files[i])[0] for i in trange(nimg)]
-            train_labels = [io.imread(train_labels_files[i])[0] for i in trange(nimg)]
+            train_labels = [io.imread(train_labels_files[i]) for i in trange(nimg)]
         nimg_test = len(test_files) if test_files is not None else None
         if load_files and nimg_test:
             test_data = [io.imread(test_files[i])[0] for i in trange(nimg_test)]
-            test_labels = [io.imread(test_labels_files[i])[0] for i in trange(nimg_test)]
+            test_labels = [io.imread(test_labels_files[i]) for i in trange(nimg_test)]
 
     ### check that arrays are correct size
     if ((train_labels is not None and nimg != len(train_labels)) or
@@ -419,6 +404,167 @@ def _process_train_test(train_data=None, train_labels=None, metainf = None,
             test_probs, diam_test, normed)
 
 
+
+class RandomErasing(object):
+    '''
+    Class that performs Random Erasing in Random Erasing Data Augmentation by Zhong et al.
+    Code from git repo (I do not remember which one)
+    -------------------------------------------------------------------------------------
+    probability: The probability that the operation will be performed.
+    sl: min erasing area
+    sh: max erasing area
+    r1: min aspect ratio
+    mean: erasing value
+    -------------------------------------------------------------------------------------
+    '''
+
+    def __init__(self, probability=0.5, sl=0.02, sh=0.4, r1=0.3, mean=[0.4914, 0.4822, 0.4465]):
+        self.probability = probability
+        self.mean = mean
+        self.sl = sl
+        self.sh = sh
+        self.r1 = r1
+
+    def __call__(self, img):
+
+        if random.uniform(0, 1) > self.probability:
+            return img
+
+        for attempt in range(100):
+            area = np.prod(img.shape)
+
+            target_area = random.uniform(self.sl, self.sh) * area
+            aspect_ratio = random.uniform(self.r1, 1 / self.r1)
+
+            h = int(round(np.sqrt(target_area * aspect_ratio)))
+            w = int(round(np.sqrt(target_area / aspect_ratio)))
+
+            if w <= img.shape[1] and h <= img.shape[2]:
+                x1 = random.randint(0, img.shape[1] - w)
+                y1 = random.randint(0, img.shape[2] - h)
+                img[:, x1:x1 + h, y1:y1 + w] = self.mean[0]
+                return img
+
+        return img
+
+
+def random_rotate_and_resize(X, scale_range=1., xy=(224, 224), do_3D=False,
+                             do_flip=True, rotate=True, rescale=None, unet=False,
+                             random_per_image=True):
+    """Augmentation by random rotation and resizing.
+
+    Args:
+        X (list of ND-arrays, float): List of image arrays of size [nchan x Ly x Lx] or [Ly x Lx].
+        scale_range (float, optional): Range of resizing of images for augmentation.
+            Images are resized by (1-scale_range/2) + scale_range * np.random.rand(). Defaults to 1.0.
+        xy (tuple, int, optional): Size of transformed images to return. Defaults to (224,224).
+        do_flip (bool, optional): Whether or not to flip images horizontally. Defaults to True.
+        rotate (bool, optional): Whether or not to rotate images. Defaults to True.
+        rescale (array, float, optional): How much to resize images by before performing augmentations. Defaults to None.
+        unet (bool, optional): Whether or not to use unet. Defaults to False.
+        random_per_image (bool, optional): Different random rotate and resize per image. Defaults to True.
+
+    Returns:
+        tuple containing
+            - imgi (ND-array, float): Transformed images in array [nimg x nchan x xy[0] x xy[1]].
+            - lbl (ND-array, float): Transformed labels in array [nimg x nchan x xy[0] x xy[1]].
+            - scale (array, float): Amount each image was resized by.
+    """
+    scale_range = max(0, min(2, float(scale_range)))
+    nimg = X.shape[0]
+    nchan = X.shape[1]
+    
+    if do_3D and X[0].ndim > 3:
+        shape = (X[0].shape[-3], xy[0], xy[1])
+    else:
+        shape = (xy[0], xy[1])
+    
+    imgi = np.zeros((nimg, nchan, *shape), np.float32)
+    scale = np.ones(nimg, np.float32)
+
+    for n in range(nimg):
+        Ly, Lx = X[n].shape[-2:]
+
+        if random_per_image or n == 0:
+            # generate random augmentation parameters
+            flip = np.random.rand() > .5
+            theta = np.random.rand() * np.pi * 2 if rotate else 0.
+            scale[n] = (1 - scale_range / 2) + scale_range * np.random.rand()
+            if rescale is not None:
+                scale[n] *= 1. / rescale[n]
+            dxy = np.maximum(0, np.array([Lx * scale[n] - xy[1],
+                                          Ly * scale[n] - xy[0]]))
+            dxy = (np.random.rand(2,) - .5) * dxy
+
+            # create affine transform
+            cc = np.array([Lx / 2, Ly / 2])
+            cc1 = cc - np.array([Lx - xy[1], Ly - xy[0]]) / 2 + dxy
+            pts1 = np.float32([cc, cc + np.array([1, 0]), cc + np.array([0, 1])])
+            pts2 = np.float32([
+                cc1,
+                cc1 + scale[n] * np.array([np.cos(theta), np.sin(theta)]),
+                cc1 + scale[n] *
+                np.array([np.cos(np.pi / 2 + theta),
+                          np.sin(np.pi / 2 + theta)])
+            ])
+            M = cv2.getAffineTransform(pts1, pts2)
+
+        img = X[n].copy()
+
+        if flip and do_flip:
+            img = img[..., ::-1]
+
+        for k in range(nchan):
+            
+            if do_3D:
+                for z in range(shape[0]):
+                    I = cv2.warpAffine(img[k, z], M, (xy[1], xy[0]),
+                                       flags=cv2.INTER_LINEAR)
+                    imgi[n, k, z] = I
+            else:
+                I = cv2.warpAffine(img[k], M, (xy[1], xy[0]), flags=cv2.INTER_LINEAR)
+                imgi[n, k] = I
+            
+    imgi = np.expand_dims(imgi, 1)  
+    return imgi, scale
+
+def masking(imgi, chans, onehot_empty):
+    # mask the label images:
+    Erasing_transform = RandomErasing(0.6, sl = 0.01, sh = 0.33, mean = [1.])
+    for n in range(imgi.shape[0]):
+        for k in range(imgi.shape[2]):
+            if not chans[n][k] == onehot_empty:
+                imgi[n, :, k] = Erasing_transform(imgi[n, :, k])
+    return imgi
+
+def pad_and_normalize(X, chans, empty_val):
+    nchan = [x.shape[0] for x in X]
+    
+    # if not all images have the same number of channels:
+    # change and make sure every image is the same dimensionality by subsampling
+    min_chans = min(nchan)
+    if not all(x == min_chans for x in nchan):
+        rand_perm = [np.random.permutation(n)[:min_chans] for n in nchan]
+        X = [x[i] for i, x in zip(rand_perm, X)]
+        chans = [x[i] for i, x in zip(rand_perm, chans)]
+        
+    # normalisierung
+    X = np.asarray(X, dtype = np.float32)
+    
+    X = (X-np.min(X, axis=(2, 3), keepdims=True))/(np.max(X, axis=(2, 3), keepdims=True)-np.min(X, axis=(2, 3), keepdims=True))
+    
+    # padding
+    _, D, H, W = X.shape
+    if W % 4 != 0:
+        X = np.pad(X, ((0,0), (0,0), (0,0), (0, 4 - W % 4)))
+    if H % 4 != 0:
+        X = np.pad(X, ((0,0), (0,0), (0, 4 - H % 4), (0,0)))
+    if D % 4 != 0:
+        X = np.pad(X, ((0,0), (0, 4 - D % 4), (0,0), (0,0)))
+        chans = [np.append(X, [empty_val]*(4-D%4)) for X in chans]
+    return X, chans
+
+
 def train_seg(net, train_data=None, train_labels=None, metainf = None, 
               metainf_test = None, train_files=None, train_labels_files=None, 
               train_probs=None, test_data=None,
@@ -467,12 +613,16 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
         Path: path to saved model weights
     """
     device = net.device
+    net.mode = "pt"
     
     # read onehot vector
     with open('/mnt/volume/Vol_b/Cell_seg_max/cellpose_multi_channel/onehot.json') as json_data:
         onehot_dict = json.load(json_data)
         json_data.close()
-        
+    onehot_empty = max(onehot_dict.values())
+    
+    
+    
     scale_range0 = 0.5 if rescale else 1.0
     scale_range = scale_range if scale_range is not None else scale_range0
 
@@ -528,7 +678,6 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
 
     # LR = [learning_rate * (1.0 - iepoch / n_epochs) ** 0.9 for iepoch in range(n_epochs)]
     
-
     train_logger.info(f">>> n_epochs={n_epochs}, n_train={nimg}, n_test={nimg_test}")
     if not SGD:
         train_logger.info(
@@ -548,7 +697,6 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
     save_path = Path.cwd() if save_path is None else Path(save_path)
     model_path = save_path / "models" / model_name
     (save_path / "models").mkdir(exist_ok=True)
-
     # Create a TensorBoard summary writer for logging
     writer = SummaryWriter(save_path / 'log')
     print("Tensorboard path:", save_path / 'log')
@@ -560,15 +708,11 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
     
     import torchinfo
     net.eval()
-    # print(torchinfo.summary(net,((1, 1, 7, 448, 448), (1, 7)), col_names = ["input_size",
+    # print(torchinfo.summary(net,(1, 1, 7, 448, 448), col_names = ["input_size",
     #             "output_size", "num_params", "params_percent", 
     #             "kernel_size", "mult_adds"], verbose = 0))
     lavg, lavgMSE, lavgBCE, nsum = 0, 0, 0, 0 
     
-    param_names = []
-    for name, param in net.named_parameters():
-        if(param.requires_grad) and ("bias" not in name):
-            param_names.append(name)
             
     for iepoch in range(n_epochs):
         # np.random.seed(iepoch)
@@ -580,7 +724,6 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
         for param_group in optimizer.param_groups:
             param_group["lr"] = LR[iepoch]
         net.train()
-        
         for k in range(0, nimg_per_epoch, batch_size):
             kend = min(k + batch_size, nimg)
             inds = rperm[k:kend]
@@ -593,119 +736,62 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
             diams = np.array([diam_train[i] for i in inds])
             rsc = diams / net.diam_mean.item() if rescale else np.ones(
                 len(diams), "float32")
+            
+            X, chans = pad_and_normalize(imgs, chans, onehot_empty)
             # augmentations
-            imgi, chans, lbl = transforms.random_rotate_and_resize(imgs, chans, Y=lbls, rescale=rsc,
-                                                            scale_range=scale_range,
-                                                            xy=(bsize, bsize))[:3]
+            X, _ = random_rotate_and_resize(X, rescale=rsc,
+                                            scale_range=scale_range,
+                                            xy=(bsize, bsize))
+            Y = X.copy()
+            X = masking(X, chans, onehot_empty)
             
-            # # Create a tensor of ones (black) with the desired shape
-            # imgi = np.ones((1, 7, 448, 448))
-
-            # # Set the right half of the image to zeros (white)
-            # imgi[:, :, :, 224:] = 0
+            X = torch.from_numpy(X).to(device)
+            Y = torch.from_numpy(Y).to(device)
             
-            # lbl = np.array(labels_to_flows([imgi[:, 0].astype(np.int16)])).astype(np.float16)[:, 1:]
-            
-            
-
-            
-            # normalisierung
-            imgi = imgi.astype(np.float32)
-            imgi = (imgi-np.min(imgi, axis=(2, 3), keepdims=True))/(np.max(imgi, axis=(2, 3), keepdims=True)-np.min(imgi, axis=(2, 3), keepdims=True))
-            
-            X = torch.from_numpy(imgi).float().to(device)
-            lbl = torch.from_numpy(lbl).float().to(device)
             chans = torch.from_numpy(np.array(chans)).long().to(device)
-            
-            # B, C, H, W = X.shape
-            # add the embedding dimension
-            y = net(X.unsqueeze(1), chans)[0]
-            loss, train_MSELoss,train_BCE_loss = _loss_fn_seg(lbl, y, device)
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(net.parameters(), 5.0)
-            optimizer.step()
-
-            train_MSELoss,train_BCE_loss = train_MSELoss.item(),train_BCE_loss.item()
+            y = net(X, chans)[0]
+            X = X.squeeze(1)
+            Y = Y.squeeze(1)
+            loss = _loss_fn_seg(Y, y, chans, onehot_empty)
+            with torch.autograd.set_detect_anomaly(True):
+                optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 5.0)
+                optimizer.step()
+                
             train_loss = loss.item()
+            train_loss *= len(imgs)
+            lavg += train_loss
+            nsum += len(imgs)
             writer.add_scalar('info/7_lr', LR[iepoch], iepoch)
             writer.add_scalar('info/4_total_loss_CP', train_loss, iepoch)
-            writer.add_scalar('info/2_MSE_loss', train_MSELoss, iepoch)
-            writer.add_scalar('info/0_BCE_loss', train_BCE_loss, iepoch)
-            train_loss *= len(imgi)
-            lavg += train_loss
-            train_MSELoss *= len(imgi)
-            lavgMSE += train_MSELoss
-            train_BCE_loss *= len(imgi)
-            lavgBCE += train_BCE_loss
-            nsum += len(imgi)
-        if iepoch >= 20 or iepoch % 10 == 0:
-            if iepoch == 0:     
-                # generate plot 
-                plt.xlabel("Layers")
-                plt.ylabel("gradient")
-                plt.title("Gradient flow")
-                plt.legend([plt.Line2D([0], [0], color="#FF5722", lw=4),
-                plt.Line2D([0], [0], color="#03A9F4", lw=4)],['max-gradient', 'mean-gradient'])
-                plot = plt
-            plot, grad_flow_img = plot_grad_flow_tb(net.named_parameters(), plot)
-            writer.add_image('info/grad_flow_img', grad_flow_img, iepoch)
-        
-            output = y[0].cpu().detach().numpy()
-            label = lbl[0].cpu().detach().numpy()
-            image_train = X[0].cpu().detach().numpy()
+
+        if iepoch == 5 or iepoch % 10 == 0:
             
-            param_names = []
-            param_means = []
-            param_maxes = []
-            if iepoch == 5 or iepoch % 20 == 0:
+            if iepoch == 20:
+                plot_grad_flow(net.named_parameters()) # version 2
+        
+            image_train = X[0].cpu().detach().numpy()
+            label_train = Y[0].cpu().detach().numpy()
+            prediction_train = y[0].cpu().detach().numpy()
+            
+            if iepoch == 5 or iepoch % 100 == 0:
                 for name, param in net.named_parameters():
                     if(param.requires_grad) and ("bias" not in name):
-                        param_names.append(name)
-                        param_means.append(param.grad.abs().mean().detach().cpu().numpy())
-                        param_maxes.append(param.grad.abs().max().detach().cpu().numpy())
                         try:
-                            writer.add_histogram('weight/' + name, param, global_step=iepoch)
                             writer.add_histogram('grad/' + name, param.grad, global_step=iepoch)
+                            writer.add_histogram('weight/' + name, param, global_step=iepoch)
                         except:
                             print("NOT WORKING", name)
-                writer.add_histogram(f'info/gradient_mean', param_means, iepoch)
-                writer.add_histogram(f'info/gradient_max', param_maxes, iepoch)
             image = np.expand_dims(np.mean(image_train, 0), 0)
-            writer.add_image('train/Image', image, iepoch)
+            writer.add_image('train/Image', np.uint8(image*255), iepoch)
+            prediction = np.expand_dims(np.mean(prediction_train, 0), 0)
+            writer.add_image('train/Pred', np.uint8(prediction*255), iepoch)
             
-            cellprob = output[2]
-            dP = output[:2]
-            out_mask, p = dynamics.compute_masks(dP = dP, cellprob = cellprob, cellprob_threshold = 0.0, flow_threshold = 1.0)
-            orig_label, _ = dynamics.compute_masks(dP = label[1:], cellprob = label[0], cellprob_threshold = 0.0, flow_threshold = 1.0)
-            
-            
-            # calculate IoU
-            F1 = multiclass(out_mask.astype(int), orig_label.astype(int), f1_score_binary)
-            # binary_f1 = f1_score_binary(np.clip(label[0].flatten(), 0, 1), (cellprob > -0.25).flatten())
-            IoU = multiclass(out_mask.astype(int), orig_label.astype(int), IoU_binary)
-            writer.add_scalar('info/8_IoU_train', IoU, iepoch)
-            writer.add_scalar('info/9_f1_train', F1, iepoch)
-            
-            
-            # plot the predictions
-            out_mask = out_mask.astype(float)
-            norm_pred = plt.Normalize(np.min(out_mask), np.max(out_mask))
-            out_mask[out_mask==0.] = np.nan
-            writer.add_image('train/Prediction', np.transpose(np.uint8(cmap((norm_pred(out_mask)))*255), (2, 0, 1)), iepoch)
-            writer.add_image('train/Prediction_Y_flows', np.transpose(np.uint8(cm.bwr(output[0] + 0.5)*255), (2, 0, 1)), iepoch)
-            writer.add_image('train/Prediction_X_flows', np.transpose(np.uint8(cm.bwr(output[1] + 0.5)*255), (2, 0, 1)), iepoch)
-            writer.add_image('train/Prediction_cellprob', np.transpose(np.uint8(cm.gray(output[2])*255), (2, 0, 1)), iepoch)
-    
-            
-            # plot the labels
-            orig_label = orig_label.astype(float)
-            norm_label = plt.Normalize(np.min(orig_label), np.max(orig_label))
-            orig_label[orig_label==0.] = np.nan
-            writer.add_image('train/GroundTruth', np.transpose(np.uint8(cmap((norm_label(orig_label)))*255), (2, 0, 1)), iepoch)
-            writer.add_image('train/GroundTruth_Y_flows', np.transpose(np.uint8(cm.bwr(label[1] + 0.5)*255), (2, 0, 1)), iepoch)
-            writer.add_image('train/GroundTruth_X_flows', np.transpose(np.uint8(cm.bwr(label[2] + 0.5)*255), (2, 0, 1)), iepoch)
-            writer.add_image('train/GroundTruth_cellprob', np.transpose(np.uint8(cm.gray(label[0])*255), (2, 0, 1)), iepoch)
+            for i in range(image_train.shape[0]):
+                writer.add_image(f'train/{i}_Image', np.transpose(np.uint8(cm.gray(image_train[i])*255), (2, 0, 1)), iepoch)
+                writer.add_image(f'train/{i}_Label', np.transpose(np.uint8(cm.gray(label_train[i])*255), (2, 0, 1)), iepoch)
+                writer.add_image(f'train/{i}_Prediction', np.transpose(np.uint8(cm.gray(prediction_train[i])*255), (2, 0, 1)), iepoch)
             
             lavgt = 0.
             if test_data is not None or test_files is not None:
@@ -723,82 +809,55 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
                                                 labels=test_labels, files=test_files,
                                                 labels_files=test_labels_files,
                                                 **kwargs)
+                        
                         # generate the onehot vector for channels
                         chans = [np.asarray([onehot_dict.get(x, x) for x in list(y.values())])  for y in np.asarray(metainf_test)[inds]]
             
                         diams = np.array([diam_test[i] for i in inds])
                         rsc = diams / net.diam_mean.item() if rescale else np.ones(
                             len(diams), "float32")
-                        imgi, chans, lbl = transforms.random_rotate_and_resize(
-                            imgs, chans, Y=lbls, rescale=rsc, scale_range=scale_range,
-                            xy=(bsize, bsize))[:3]
-                        X = torch.from_numpy(imgi).float().to(device)
-                        lbl = torch.from_numpy(lbl).float().to(device)
+                        
+                        X, chans = pad_and_normalize(imgs, chans, max(onehot_dict.values()))
+                        X, _ = random_rotate_and_resize(
+                            X, rescale=rsc, 
+                            scale_range=scale_range,
+                            xy=(bsize, bsize))
+                        
+                        Y = X.copy()
+                        X = masking(X, chans, onehot_empty)
+                        
+                        X = torch.from_numpy(X).to(device)
+                        Y = torch.from_numpy(Y).to(device)
                         chans = torch.from_numpy(np.array(chans)).long().to(device)
-                        # B, C, H, W = X.shape
-                        # add the embedding dimension
-                        y = net(X.unsqueeze(1), chans)[0]
-                        loss, test_MSELoss,test_BCE_loss  = _loss_fn_seg(lbl, y, device)
-                        test_loss, test_MSELoss,test_BCE_loss = loss.item(), test_MSELoss.item(),test_BCE_loss.item()
-                        test_loss *= len(imgi)
+                        
+                        y = net(X, chans)[0]
+                        X = X.squeeze(1)
+                        Y = Y.squeeze(1)
+                        loss = _loss_fn_seg(Y, y, chans, onehot_empty)
+                        test_loss = loss.item()
+                        test_loss *= len(imgs)
                         lavgt += test_loss
                 lavgt /= len(rperm)
                 
-                
-                output = y[0].cpu().detach().numpy()
                 image_test = X[0].cpu().detach().numpy()
-                label = lbl[0].cpu().detach().numpy()
-                
-                
-                cellprob = output[2]
-                dP = output[:2]
-                out_mask, p = dynamics.compute_masks(dP = dP, cellprob = cellprob, cellprob_threshold = 0.0, flow_threshold = 1.0)
-                orig_label, _ = dynamics.compute_masks(dP = label[1:], cellprob = label[0], cellprob_threshold = 0.0, flow_threshold = 1.0)
-                orig_label = orig_label.astype(int)
+                prediction_test = y[0].cpu().detach().numpy()
                 
                 writer.add_scalar('info/5_total_loss_CP_test', test_loss, iepoch)
-                writer.add_scalar('info/3_MSE_loss_test', test_MSELoss, iepoch)
-                writer.add_scalar('info/1_BCE_loss_test', test_BCE_loss, iepoch)
-                
-                # calculate IoU
-                F1 = multiclass(out_mask.astype(int), orig_label.astype(int), f1_score_binary)
-                # binary_f1 = f1_score_binary(np.clip(label[0].flatten(), 0, 1), (cellprob > -0.25).flatten())
-                IoU = multiclass(out_mask.astype(int), orig_label.astype(int), IoU_binary)
-                writer.add_scalar('info/6_IoU_test', IoU, iepoch)
-                writer.add_scalar('info/7_f1_test', F1, iepoch)
                 
                 
                 image = np.expand_dims(np.mean(image_test, 0), 0)
-                image = (image - image.min()) / (image.max() - image.min())
-                writer.add_image('test/Image', image, iepoch)
+                writer.add_image('test/Image', np.uint8(image*255), iepoch)
+                
+                prediction_test = np.expand_dims(np.mean(prediction_test, 0), 0)
+                writer.add_image('test/Prediction', np.uint8(prediction_test*255), iepoch)
                 
                 
-                # plot the labels
-                orig_label = orig_label.astype(float)
-                norm_label = plt.Normalize(np.min(orig_label), np.max(orig_label))
-                orig_label[orig_label==0.] = np.nan
-                writer.add_image('test/GroundTruth', np.transpose(np.uint8(cmap((norm_label(orig_label)))*255), (2, 0, 1)), iepoch)
-                writer.add_image('test/GroundTruth_cellprob', np.transpose(np.uint8(cm.gray(label[0])*255), (2, 0, 1)), iepoch)
-                writer.add_image('test/GroundTruth_Y_flows', np.transpose(np.uint8(cm.bwr(label[1] + 0.5)*255), (2, 0, 1)), iepoch)
-                writer.add_image('test/GroundTruth_X_flows', np.transpose(np.uint8(cm.bwr(label[2] + 0.5)*255), (2, 0, 1)), iepoch)
-        
-                # plot the predictions
-                out_mask = out_mask.astype(float)
-                norm_pred = plt.Normalize(np.min(out_mask), np.max(out_mask))
-                out_mask[out_mask==0.] = np.nan
-                writer.add_image('test/Prediction', np.transpose(np.uint8(cmap((norm_pred(out_mask)))*255), (2, 0, 1)), iepoch)
-                writer.add_image('test/Prediction_Y_flows', np.transpose(np.uint8(cm.bwr(output[0] + 0.5)*255), (2, 0, 1)), iepoch)
-                writer.add_image('test/Prediction_X_flows', np.transpose(np.uint8(cm.bwr(output[1] + 0.5)*255), (2, 0, 1)), iepoch)
-                writer.add_image('test/Prediction_cellprob', np.transpose(np.uint8(cm.gray(output[2])*255), (2, 0, 1)), iepoch)
-                
-                del out_mask, norm_pred, orig_label, image, image_test, image_train, cellprob, output
+                del image, image_test, prediction_test, image_train, prediction_train
                 
                 
             lavg /= nsum
-            lavgMSE /= nsum
-            lavgBCE /= nsum
             train_logger.info(
-                f"{iepoch}, train_loss={lavg:.4f}, train_MSE_loss={lavgMSE:.4f}, train_BCE_loss={lavgBCE:.4f}, test_loss={lavgt:.4f}, LR={LR[iepoch]:.4f}, time {time.time()-t0:.2f}s"
+                f"{iepoch}, train_loss={lavg:.4f}, test_loss={lavgt:.4f}, LR={LR[iepoch]:.4f}, time {time.time()-t0:.2f}s"
             )
             lavg, nsum = 0, 0
 

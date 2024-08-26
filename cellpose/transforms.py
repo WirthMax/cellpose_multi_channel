@@ -771,7 +771,7 @@ def pad_image_ND(img0, div=16, extra=1, min_size=None):
     return I, ysub, xsub
 
 
-def random_rotate_and_resize(X, Y=None, scale_range=1., xy=(224, 224), do_3D=False,
+def random_rotate_and_resize(X, chans = None, Y=None, scale_range=1., xy=(224, 224), do_3D=False,
                              do_flip=True, rotate=True, rescale=None, unet=False,
                              random_per_image=True):
     """Augmentation by random rotation and resizing.
@@ -806,8 +806,9 @@ def random_rotate_and_resize(X, Y=None, scale_range=1., xy=(224, 224), do_3D=Fal
     # change and make sure every image is the same dimensionality by subsampling
     min_chans = min(nchan)
     if not all(x == min_chans for x in nchan):
-        np.random.permutation(10)
-        X = [x[np.random.permutation(x.shape[0])[:min_chans]] for x in X]
+        rand_perm = [np.random.permutation(n)[:min_chans] for n in nchan]
+        X = [x[i] for i, x in zip(rand_perm, X)]
+        chans = [x[i] for i, x in zip(rand_perm, chans)]
     nchan = min_chans
     
     if do_3D and X[0].ndim > 3:
@@ -891,5 +892,5 @@ def random_rotate_and_resize(X, Y=None, scale_range=1., xy=(224, 224), do_3D=Fal
                 v2 = lbl[n, -2].copy()
                 lbl[n, -2] = (-v1 * np.sin(-theta) + v2 * np.cos(-theta))
                 lbl[n, -1] = (v1 * np.cos(-theta) + v2 * np.sin(-theta))
-
-    return imgi, lbl, scale
+    
+    return imgi, chans, lbl, scale
