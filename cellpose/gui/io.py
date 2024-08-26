@@ -29,21 +29,6 @@ except:
 
 
 
-# @njit(parallel=True, fastmath=True)   
-def colorize(im, color, clip_percentile=0.1):
-    """
-    Helper function to create an RGB image from a single-channel image using a 
-    specific color.
-    """
-    # Check that we do just have a 2D image
-    if im.ndim > 2 and im.shape[2] != 1:
-        raise ValueError('This function expects a single-channel image!')
-    # Need to make sure we have a channels dimension for the multiplication to work
-    im_scaled = np.atleast_3d(im)
-    im_scaled = im_scaled*color[:3]
-    return (im_scaled - np.min(im_scaled))/np.ptp(im_scaled)
-
-
 def _init_model_list(parent):
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     parent.model_list_path = MODEL_LIST_PATH
@@ -200,19 +185,12 @@ def _initialize_images(parent, image, metainf, load_3D=False):
 
 
     parent.nchan = image.shape[-1]
+    print("SET NCHAN TO", parent.nchan)
     
-    print(parent.metainf)
     if not metainf is None:
         parent.metainf = metainf
-
-    elif image.shape[-1] == 2:
-        # fill in with blank channels to make 3 channels
-        shape = image.shape
-        image = np.concatenate(
-            (image, np.zeros((*shape[:-1], 3 - shape[-1]), dtype=np.uint8)), axis=-1)
-        parent.nchan = 2
-    elif image.shape[-1] == 1:
-        parent.nchan = 1
+    print("METAINF", parent.metainf)
+        
 
     parent.stack = image
     if load_3D:
@@ -252,13 +230,6 @@ def _initialize_images(parent, image, metainf, load_3D=False):
     if not hasattr(parent, "stack_filtered") and parent.restore:
         print("GUI_INFO: no 'img_restore' found, applying current settings")
         parent.compute_restore()
-
-    if parent.autobtn.isChecked():
-        if parent.restore is None or parent.restore != "filter":
-            print(
-                "GUI_INFO: normalization checked: computing saturation levels (and optionally filtered image)"
-            )
-            parent.compute_saturation()
     # elif len(parent.saturation) != parent.NZ:
     #     parent.saturation = []
     #     for r in range(3):
@@ -270,6 +241,12 @@ def _initialize_images(parent, image, metainf, load_3D=False):
     parent.compute_scale()
     parent.track_changes = []
     parent._init_sliders()
+    if parent.autobtn.isChecked():
+        if parent.restore is None or parent.restore != "filter":
+            print(
+                "GUI_INFO: normalization checked: computing saturation levels (and optionally filtered image)"
+            )
+            parent.compute_saturation()
 
     if load_3D:
         parent.currentZ = int(np.floor(parent.NZ / 2))
@@ -310,7 +287,6 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
                     found_image = True
         if found_image:
             try:
-                print(parent.filename)
                 image, metainf = imread(parent.filename)
             except:
                 parent.loaded = False
@@ -318,7 +294,6 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
                 print("ERROR: cannot find image file, loading from npy")
         if not found_image:
             parent.filename = filename[:-8]
-            print(parent.filename)
             if "img" in dat:
                 image = dat["img"]
             else:
@@ -368,7 +343,6 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
                                          1).setEnabled(True)
         parent.view = parent.ViewDropDown.count() - 1
         if parent.restore and "upsample" in parent.restore:
-            print(parent.stack_filtered.shape, image.shape)
             parent.ratio = dat["ratio"]
 
     parent.set_restore_button()
@@ -377,7 +351,6 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
                        image = image, 
                        metainf = metainf, 
                        load_3D=load_3D)
-    print(parent.stack.shape)
     if "chan_choose" in dat:
         parent.ChannelChoose[0].setCurrentIndex(dat["chan_choose"][0])
         parent.ChannelChoose[1].setCurrentIndex(dat["chan_choose"][1])
@@ -470,7 +443,7 @@ def _load_masks(parent, filename=None):
         name = QFileDialog.getOpenFileName(parent, "Load masks (PNG or TIFF)")
         filename = name[0]
     print(f"GUI_INFO: loading masks: {filename}")
-    masks = imread(filename)
+    masks, _ = imread(filename)
     outlines = None
     if masks.ndim > 3:
         # Z x nchannels x Ly x Lx
@@ -678,7 +651,6 @@ def _save_sets(parent):
             "diameter":
                 parent.diameter
         }
-        print(dat["masks"].shape)
         if parent.restore is not None:
             dat["img_restore"] = parent.stack_filtered
         np.save(base + "_seg.npy", dat)

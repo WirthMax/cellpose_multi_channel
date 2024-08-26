@@ -442,15 +442,16 @@ class CellposeModel():
         else:
             # reshape image
             if self.net.model_string != "Transformer":
-            	x = transforms.convert_image(x, channels, channel_axis=channel_axis,
-                     	                    z_axis=z_axis, do_3D=(do_3D or
-                     	                                          stitch_threshold > 0),
-                    	                     nchan=self.nchan)
+                x = transforms.convert_image(x, channels, channel_axis=channel_axis,
+                                             z_axis=z_axis, do_3D=(do_3D or
+                                                                   stitch_threshold > 0),
+                                             nchan=self.nchan)
             else:
-            	x = transforms.convert_image(x, None, channel_axis=channel_axis,
-                     	                    z_axis=z_axis, do_3D=(do_3D or
-                     	                                          stitch_threshold > 0),
-                    	                     nchan=x.shape[-1])
+                x = transforms.convert_image(x, None, channel_axis=channel_axis,
+                                             z_axis=z_axis, do_3D=(do_3D or
+                                                                   stitch_threshold > 0),
+                                             nchan=x.shape[-1])
+            
             if x.ndim < 4:
                 x = x[np.newaxis, ...]
             self.batch_size = batch_size
