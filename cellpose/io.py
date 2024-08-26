@@ -428,13 +428,14 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
 
     images = []
     labels = []
+    metainfs = []
     k = 0
     for n in range(nimg):
         if (os.path.isfile(label_names[n]) or 
             (flow_names is not None and os.path.isfile(flow_names[0]))):
             image, metainf = imread(image_names[n])
             if label_names is not None:
-                label = imread(label_names[n])
+                label = imread(label_names[n])[0]
             if flow_names is not None:
                 flow = imread(flow_names[n])[0]
                 if flow.shape[0] < 4:
@@ -443,9 +444,10 @@ def load_images_labels(tdir, mask_filter="_masks", image_filter=None,
                     label = flow
             images.append(image)
             labels.append(label)
+            metainfs.append(metainf)
             k += 1
     io_logger.info(f"{k} / {nimg} images in {tdir} folder have labels")
-    return images, labels, image_names
+    return images, metainfs, labels, image_names
 
 
 def load_train_test_data(train_dir, test_dir=None, image_filter=None,
@@ -468,16 +470,16 @@ def load_train_test_data(train_dir, test_dir=None, image_filter=None,
         test_labels (list, optional): A list of labels corresponding to the testing images. None if test_dir is not provided.
         test_image_names (list, optional): A list of names of the testing images. None if test_dir is not provided.
     """
-    images, labels, image_names = load_images_labels(train_dir, mask_filter,
+    images, metainf, labels, image_names = load_images_labels(train_dir, mask_filter,
                                                      image_filter, look_one_level_down)
 
     # testing data
     test_images, test_labels, test_image_names = None, None, None
     if test_dir is not None:
-        test_images, test_labels, test_image_names = load_images_labels(
+        test_images, test_metainf, test_labels, test_image_names = load_images_labels(
             test_dir, mask_filter, image_filter, look_one_level_down)
 
-    return images, labels, image_names, test_images, test_labels, test_image_names
+    return images, metainf, labels, image_names, test_images, test_metainf, test_labels, test_image_names
 
 
 def masks_flows_to_seg(images, masks, flows, file_names, diams=30., channels=None,

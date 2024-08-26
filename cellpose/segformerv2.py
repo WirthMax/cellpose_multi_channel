@@ -158,7 +158,7 @@ class PatchEmbed3D(nn.Module):
 
         self.embed_dim = embed_dim
 
-        self.proj = nn.Conv3d(1, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv3d(10, embed_dim, kernel_size=patch_size, stride=patch_size)
         if norm_layer is not None:
             self.norm = norm_layer(embed_dim)
         else:
@@ -739,13 +739,12 @@ class FinalPatchExpand_X4(nn.Module):
         dim_scale (tuple of int, optional): The factor by which to expand the spatial dimensions. Default is (4, 4, 4).
         norm_layer (callable, optional): The normalization layer to use. Default is nn.LayerNorm.
     """
-    def __init__(self, dim, dim_scale=4, norm_layer=nn.LayerNorm):
+    def __init__(self, dim, dim_scale=4, output_dim = 3, norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
         self.kernel_sizes = dim_scale
-        self.expand = nn.Linear(dim, int(np.prod(dim_scale) * dim), bias=False)
-        self.output_dim = dim
-        self.norm = norm_layer(self.output_dim)
+        self.expand = nn.ConvTranspose3d(48, output_dim, kernel_size=(4, 4, 4), stride=(4, 4, 4), bias=False)
+        self.norm = norm_layer(output_dim)
 
     def forward(self, x):
         """ Forward pass for the FinalPatchExpand_X4 module.
@@ -759,17 +758,7 @@ class FinalPatchExpand_X4(nn.Module):
         torch.Tensor: 
             The output tensor with shape (B, C, H, W, D),  expanded spatial dimensions and normalized channels.
         """
-        B, C, D, H, W = x.shape
-        x = x.flatten(2).transpose(1, 2)
-        x = self.expand(x)
-        B, L, C = x.shape
-        x = x.view(B, D, H, W, C)
-        x = rearrange(x, 'b d h w (p1 p2 p3 c)-> b (d p1) (h p2) (w p3) c', 
-                      p1=self.kernel_sizes[0], 
-                      p2=self.kernel_sizes[1],
-                      p3=self.kernel_sizes[2],
-                      c=self.output_dim)
-        # x = x.view(B, -1, self.output_dim)
+        x = self.expand(x).permute(0, 2, 3, 4, 1)
         x = self.norm(x) # B, D, H, W, C
         return x.permute(0, 4, 1, 2, 3) # B, C, H, W, D
 
@@ -904,6 +893,18 @@ class batchconvstyle(nn.Module):
         y = self.conv(y)
         return y
 
+class AutoPool(nn.Module):
+    def __init__(self, pool_dim: int = 1) -> None:
+        super(AutoPool, self).__init__()
+        self.pool_dim: int = pool_dim
+        self.softmax: nn.modules.Module = nn.Softmax(dim=pool_dim)
+        self.register_parameter("alpha", nn.Parameter(torch.ones(1), requires_grad=True))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        weight = self.softmax(torch.mul(x, self.alpha))
+        out = torch.sum(torch.mul(x, weight), dim=self.pool_dim)
+        return out
+
 
 class Transformer(nn.Module):
     """
@@ -949,7 +950,7 @@ class Transformer(nn.Module):
                  
                 #  depths=[2, 2, 2, 1],
                 #  num_heads=[3, 6, 12, 24],
-                 depths=[2, 2, 6, 2],
+                 depths=[2, 2, 2, 2],
                  num_heads=[6, 12, 24, 48],
                 #  num_heads=[3, 6, 12],
                  window_size=(2, 7, 7),
@@ -961,7 +962,7 @@ class Transformer(nn.Module):
                  drop_path_rate=0.1,
                  
                  use_checkpoint = False,
-                 
+                 mode = "normal",
                  encoder="mit_b5", 
                  encoder_weights=None, 
                  decoder="MAnet",
@@ -971,11 +972,16 @@ class Transformer(nn.Module):
         self.mkldnn = mkldnn
         self.pos_drop = nn.Dropout(p=drop_rate)
         self.nout = nout
+        self.mode = mode
+        patch_size=(4, 4, 4)
+        self.patch_size=patch_size
+        self.embed_dim=embed_dim
+        
+        self.word_embedding = nn.Embedding(57, 10)
         
         norm_layer=nn.LayerNorm
         
         # Patch Eembedding
-        patch_size=(2, 4, 4)
         self.patch_embed = PatchEmbed3D(patch_size=patch_size, 
                                         embed_dim=embed_dim, 
                         norm_layer=norm_layer if patch_norm else None
@@ -989,27 +995,46 @@ class Transformer(nn.Module):
         self.down = nn.Sequential()
         channel_dims = []
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
+        dim = self.embed_dim
         for n, depth, heads in zip(range(len(depths)), depths, num_heads):
-            channel_dims.append(int(embed_dim * 2 ** (n+1)))
-            self.down.add_module("Basic_layer_%d" % n,
-                                BasicLayer(
-                                    dim=int(embed_dim * 2 ** n),
-                                    depth=depth,
-                                    num_heads=heads,
-                                    window_size=window_size,
-                                    mlp_ratio=mlp_ratio,
-                                    qkv_bias=qkv_bias,
-                                    qk_scale=qk_scale,
-                                    drop=drop_rate,
-                                    attn_drop=attn_drop_rate,
-                                    drop_path=dpr[sum(depths[:n]):sum(depths[:n + 1])],
-                                    drop_path_rate=drop_path_rate,
-                                    norm_layer=norm_layer,
-                                    downsample=PatchMerging(dim=int(embed_dim * 2 ** n), 
-                                                            norm_layer=norm_layer) 
-                                    if n < len(depths) else None,
-                                    use_checkpoint=use_checkpoint))
-        self.norm = norm_layer(int(embed_dim * 2 ** (len(depths))))
+            if n < (len(depths)-2):
+                self.down.add_module("Basic_layer_%d" % n,
+                                    BasicLayer(
+                                        dim=dim,
+                                        depth=depth,
+                                        num_heads=heads,
+                                        window_size=window_size,
+                                        mlp_ratio=mlp_ratio,
+                                        qkv_bias=qkv_bias,
+                                        qk_scale=qk_scale,
+                                        drop=drop_rate,
+                                        attn_drop=attn_drop_rate,
+                                        drop_path=dpr[sum(depths[:n]):sum(depths[:n + 1])],
+                                        drop_path_rate=drop_path_rate,
+                                        norm_layer=norm_layer,
+                                        downsample=PatchMerging(dim=dim, 
+                                                                norm_layer=norm_layer),
+                                        use_checkpoint=use_checkpoint))
+                dim=int(embed_dim * 2 ** (n+1))
+            else:
+                self.down.add_module("Basic_layer_%d" % n,
+                                    BasicLayer(
+                                        dim=dim,
+                                        depth=depth,
+                                        num_heads=heads,
+                                        window_size=window_size,
+                                        mlp_ratio=mlp_ratio,
+                                        qkv_bias=qkv_bias,
+                                        qk_scale=qk_scale,
+                                        drop=drop_rate,
+                                        attn_drop=attn_drop_rate,
+                                        drop_path=dpr[sum(depths[:n]):sum(depths[:n + 1])],
+                                        drop_path_rate=drop_path_rate,
+                                        norm_layer=norm_layer,
+                                        downsample = None,
+                                        use_checkpoint=use_checkpoint))
+            channel_dims.append(dim)
+        self.norm = norm_layer(dim)
     
         # Style Vector
         self.make_style = make_style()
@@ -1017,19 +1042,19 @@ class Transformer(nn.Module):
         
         # Upsampling
         # reverse depth and num heads for the decoder, add 0 for the init step
-        depths=[0]+depths[::-1]
-        num_heads=[0]+num_heads[::-1]
+        depths = list(reversed(depths[:-1]))
+        num_heads = list(reversed(num_heads[:-1]))
         
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]  # stochastic depth decay rule
         self.up = nn.Sequential()
         self.concat_back_dim = nn.Sequential()
         self.concat_back_style = nn.Sequential()
-        channel_dims = channel_dims[::-1]
+        channel_dims = channel_dims[:-2][::-1]
         channel_dims.append(embed_dim)
         # self.batchconv = nn.ModuleList()
         # self.batchconv_style = nn.ModuleList()
         for n, depth, heads in zip(range(len(depths)), depths, num_heads):
-            len_depths = len(depths)-1
+            
             if n == 0:
                 self.up.add_module("Patch_expand_up_%d" % (n),
                                 #    resup(in_channels = int(embed_dim * 2 ** len_depths - n), 
@@ -1040,13 +1065,19 @@ class Transformer(nn.Module):
                                                dim_scale=2, 
                                                norm_layer=norm_layer)
                 )
+                
+                self.concat_back_style.add_module("Concat_style_%d" % (n),
+                                                nn.Linear(channel_dims[n],
+                                        channel_dims[n]//2,
+                                        bias=False)
+                                                )
             else:
                 self.concat_back_dim.add_module("Concat_residual_%d" % (n),
                                                 nn.Linear(2 * channel_dims[n],
                                         channel_dims[n],
                                         bias=False)
                                                 )
-                if n < len_depths:
+                if not n >= len(depths)-1:
                     self.concat_back_style.add_module("Concat_style_%d" % (n),
                                                     nn.Linear(channel_dims[n],
                                             channel_dims[n]//2,
@@ -1076,20 +1107,14 @@ class Transformer(nn.Module):
                                                 norm_layer=norm_layer) if (n < len(depths)-1) else None,
                     use_checkpoint=use_checkpoint)
                 )
-                
-                # self.batchconv.append(batchconv(int(embed_dim * 2 ** (len_depths - n)), 
-                #                                     int(embed_dim * 2 ** (len_depths - n)), 
-                #                                     1))
-                # self.batchconv_style.append(batchconvstyle(int(embed_dim * 2 ** (len_depths - n)), 
-                #                                             int(embed_dim * 2 ** (len_depths - n)), 
-                #                                             int(embed_dim * 2 ** (len_depths - 1)), 1, 
-                #                                             conv_3D=True))
         self.norm_up = norm_layer(embed_dim)
         
         # Output
-        self.up4x = FinalPatchExpand_X4(dim=embed_dim, dim_scale=patch_size)
-        self.outConv = nn.Conv3d(in_channels=embed_dim, out_channels=3, kernel_size=1, bias=False)
+        
+        self.up4x = FinalPatchExpand_X4(dim=embed_dim, output_dim = 3, dim_scale=patch_size)
+        # self.outConv = nn.Linear(in_features=embed_dim, out_features=3, bias=False)
         # # self.DeepSet2 = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, 5, 5), stride = 1, padding = (0, 2, 2), bias=False, )
+        self.pooling = AutoPool(2)
         self.DeepSet2 = nn.Sequential(
             nn.BatchNorm3d(num_features = 3, eps=1e-5, momentum=0.05),
             nn.ReLU(inplace=True),
@@ -1104,8 +1129,6 @@ class Transformer(nn.Module):
         self.diam_labels = nn.Parameter(data=torch.ones(1) * diam_mean,
                                         requires_grad=False)
         self.model_string = "Transformer"
-        
-        
         
         
     @property
@@ -1152,14 +1175,16 @@ class Transformer(nn.Module):
         q_values_2 = []
 
         for i, layer in enumerate(self.down):
-            x_downsample.append(x)
+            if not i >= len(self.down)-1:
+                x_downsample.append(x)
             x, v1, k1, q1, v2, k2, q2 = layer(x, i)
-            v_values_1.append(v1)
-            k_values_1.append(k1)
-            q_values_1.append(q1)
-            v_values_2.append(v2)
-            k_values_2.append(k2)
-            q_values_2.append(q2)
+            if not i >= len(self.down)-1:
+                v_values_1.append(v1)
+                k_values_1.append(k1)
+                q_values_1.append(q1)
+                v_values_2.append(v2)
+                k_values_2.append(k2)
+                q_values_2.append(q2)
 
         x = rearrange(x, 'b c d h w -> b d h w c')
         x = self.norm(x)
@@ -1171,32 +1196,37 @@ class Transformer(nn.Module):
                             q_values_2):
         
         for inx, layer_up in enumerate(self.up):
-            if inx == 0:
-                x = layer_up(x)
-            else:
-                # x *= style.view(style.shape + (1, 1, 1))
-                
-                B, C, D, H, W = x.shape
-                x = torch.cat([x, x_downsample[::-1][inx-1]], 1)
-                x = x.flatten(2).transpose(1, 2)
-                x = self.concat_back_dim[inx-1](x)
-                x = x.view(B, C, D, H, W)
-                
-                # add style vector
-                x += style.view(B, C, 1, 1, 1)
-                # concat style 
-                if inx < len(self.up)-1:
-                    style = self.concat_back_style[inx-1](style)
-                
-                x = layer_up(x, 
-                             prev_x = x_downsample[::-1][inx-1],
-                             prev_v1 = v_values_1[::-1][inx-1], 
-                             prev_k1 = k_values_1[::-1][inx-1], 
-                             prev_q1 = q_values_1[::-1][inx-1], 
-                             prev_v2 = v_values_2[::-1][inx-1],
-                             prev_k2 = k_values_2[::-1][inx-1], 
-                             prev_q2 = q_values_2[::-1][inx-1],
-                             style = style)
+                if inx == 0:
+                    B, C, D, H, W = x.shape
+                    # add style vector
+                    # concat style 
+                    x += style.view(B, C, 1, 1, 1)
+                    x = layer_up(x)
+                    style = self.concat_back_style[inx](style)
+                else:
+                            
+                    B, C, D, H, W = x.shape
+                    # add style vector
+                    # concat style 
+                    x += style.view(B, C, 1, 1, 1)
+                    x = torch.cat([x, x_downsample[::-1][inx]], 1)
+                    x = x.flatten(2).transpose(1, 2)
+                    # here i have to -1 because there is no concat back dim 
+                    # in the first step
+                    x = self.concat_back_dim[inx-1](x)
+                    x = x.view(B, C, D, H, W)
+                    
+                    if inx < len(self.up)-1:
+                        style = self.concat_back_style[inx](style)
+                    x = layer_up(x, 
+                                    prev_x = x_downsample[::-1][inx],
+                                    prev_v1 = v_values_1[::-1][inx], 
+                                    prev_k1 = k_values_1[::-1][inx], 
+                                    prev_q1 = q_values_1[::-1][inx], 
+                                    prev_v2 = v_values_2[::-1][inx],
+                                    prev_k2 = k_values_2[::-1][inx], 
+                                    prev_q2 = q_values_2[::-1][inx],
+                                    style = style)
         x = self.norm_up(x)
         return x.permute(0, 4, 1, 2, 3) # (B, C, D, H, W)
         
@@ -1217,17 +1247,19 @@ class Transformer(nn.Module):
         X = X.permute(0, 4, 1, 2, 3) # B, D, C, H, W 
         X = self.up4x(X)
         B, C, D, H, W = X.shape
-        X = self.outConv(X)#.permute(0, 2, 1, 3, 4)
+        # X = X.permute(0, 2, 3, 4, 1)
+        # X = self.outConv(X).permute(0, 4, 1, 2, 3)
         X= nn.LeakyReLU()(X)
-        pooling = torch.nn.AdaptiveMaxPool3d((1, H, W))
-        X = pooling(X)
-        
+        if self.mode == "normal":
+            X = self.pooling(X).unsqueeze(2)
+            X = self.DeepSet2(X).squeeze(2)
+        else:
+            X = self.pooling(X.permute(0, 2, 1, 3, 4))
         # X = self.find_largest_abs_positions(X)
         # X = torch.mean(X, 2, keepdim=True)
-        X = self.DeepSet2(X)
-        return X.squeeze(2)
+        return X
 
-    def forward(self, X):
+    def forward(self, X, channels):
         """
         Forward pass of the CPnet model.
 
@@ -1239,9 +1271,13 @@ class Transformer(nn.Module):
         """
         if self.mkldnn:
             X = X.to_mkldnn()
-        B, C, H, W = X.shape
-        # add the embedding dimension
-        X = X.unsqueeze(1)
+        
+        channels = self.word_embedding(channels).permute(2, 0, 1)
+        
+        # Embedd the channels
+        X = X.permute(3, 4, 1, 0, 2)
+        X = channels + X
+        X = X.permute(3, 2, 4, 0, 1)
         
         # Patch Embed
         X = self.patch_embed(X)
