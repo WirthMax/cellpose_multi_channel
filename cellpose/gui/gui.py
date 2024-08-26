@@ -1915,8 +1915,8 @@ class MainW(QMainWindow):
                 if self.nchan > 1:
                     image = image.mean(axis=-1)
                 # apply scaling
-                min_v = self.saturation[1][self.currentZ][0]
-                max_v = self.saturation[1][self.currentZ][1]
+                min_v = self.saturation[2][self.currentZ][0]
+                max_v = self.saturation[2][self.currentZ][1]
                 image = (np.clip(image, min_v, max_v) - min_v) * (255 / (max_v - min_v))
                 self.img.setImage(image, autoLevels=False, lut=self.cmap[0])
                 
@@ -2312,7 +2312,12 @@ class MainW(QMainWindow):
         else:
             img_norm = self.stack if self.restore is None or self.restore == "filter" else self.stack_filtered
 
-        self.saturation = []
+        # for all colors
+        self.saturation.append([[0, 255.]])
+        # for grey
+        self.saturation.append([[0, 255.]])
+        # for spectra
+        self.saturation.append([[0, 255.]])
         for c in range(img_norm.shape[-1]):
             self.saturation.append([])
             if np.ptp(img_norm[..., c]) > 1e-3:
@@ -2341,13 +2346,6 @@ class MainW(QMainWindow):
             else:
                 for n in range(self.NZ):
                     self.saturation[-1].append([0, 255.])
-        # if only 2 restore channels, add blue
-        if len(self.saturation) < self.nchan:
-            for i in range(self.nchan - len(self.saturation)):
-                self.saturation.append([])
-                for n in range(self.NZ):
-                    self.saturation[-1].append([0, 255.])
-        print(self.saturation[2][self.currentZ])
 
         if invert:
             img_norm = 255. - img_norm
