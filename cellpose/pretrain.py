@@ -439,10 +439,10 @@ class RandomErasing(object):
             h = int(round(np.sqrt(target_area * aspect_ratio)))
             w = int(round(np.sqrt(target_area / aspect_ratio)))
 
-            if w <= img.shape[1] and h <= img.shape[2]:
-                x1 = random.randint(0, img.shape[1] - w)
-                y1 = random.randint(0, img.shape[2] - h)
-                img[:, x1:x1 + h, y1:y1 + w] = self.mean[0]
+            if w <= img.shape[0] and h <= img.shape[1]:
+                x1 = random.randint(0, img.shape[0] - w)
+                y1 = random.randint(0, img.shape[1] - h)
+                img[x1:x1 + h, y1:y1 + w] = self.mean[0]
                 return img
 
         return img
@@ -524,17 +524,16 @@ def random_rotate_and_resize(X, scale_range=1., xy=(224, 224), do_3D=False,
             else:
                 I = cv2.warpAffine(img[k], M, (xy[1], xy[0]), flags=cv2.INTER_LINEAR)
                 imgi[n, k] = I
-            
-    imgi = np.expand_dims(imgi, 1)  
+             
     return imgi, scale
 
 def masking(imgi, chans, onehot_empty):
     # mask the label images:
     Erasing_transform = RandomErasing(0.6, sl = 0.01, sh = 0.33, mean = [1.])
     for n in range(imgi.shape[0]):
-        for k in range(imgi.shape[2]):
+        for k in range(imgi.shape[1]):
             if not chans[n][k] == onehot_empty:
-                imgi[n, :, k] = Erasing_transform(imgi[n, :, k])
+                imgi[n, k] = Erasing_transform(imgi[n, k])
     return imgi
 
 def pad_and_normalize(X, chans, empty_val):
@@ -550,9 +549,7 @@ def pad_and_normalize(X, chans, empty_val):
         
     # normalisierung
     X = np.asarray(X, dtype = np.float32)
-    
     X = (X-np.min(X, axis=(2, 3), keepdims=True))/(np.max(X, axis=(2, 3), keepdims=True)-np.min(X, axis=(2, 3), keepdims=True))
-    
     # padding
     _, D, H, W = X.shape
     if W % 4 != 0:
@@ -562,6 +559,7 @@ def pad_and_normalize(X, chans, empty_val):
     if D % 4 != 0:
         X = np.pad(X, ((0,0), (0, 4 - D % 4), (0,0), (0,0)))
         chans = [np.append(X, [empty_val]*(4-D%4)) for X in chans]
+        
     return X, chans
 
 

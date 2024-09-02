@@ -3,11 +3,12 @@ Copyright © 2023 Howard Hughes Medical Institute, Authored by Carsen Stringer a
 """
 
 import os, sys, time, shutil, tempfile, datetime, pathlib, subprocess
+from ssl import CHANNEL_BINDING_TYPES
 from pathlib import Path
 import numpy as np
 from tqdm import trange, tqdm
 from urllib.parse import urlparse
-import torch
+import json
 
 import logging
 
@@ -139,6 +140,9 @@ class Cellpose():
         self.sz = SizeModel(device=self.device, pretrained_size=self.pretrained_size,
                             cp_model=self.cp)
         self.sz.model_type = model_type
+        
+        
+        
 
     def eval(self, x, batch_size=8, channels=[0, 0], channel_axis=None, invert=False,
              normalize=True, diameter=30., do_3D=False, find_masks=True, **kwargs):
@@ -249,6 +253,12 @@ class CellposeModel():
             device (torch device, optional): Device used for model running / training (torch.device("cuda") or torch.device("cpu")), overrides gpu input, recommended if you want to use a specific GPU (e.g. torch.device("cuda:1")).
             nchan (int, optional): Number of channels to use as input to network, default is 2 (cyto + nuclei) or (nuclei + zeros).
         """
+        
+        # read onehot vector
+        with open('/mnt/volume/Vol_b/Cell_seg_max/cellpose_multi_channel/onehot.json') as json_data:
+            self.onehot_dict = json.load(json_data)
+            json_data.close()
+        
         self.diam_mean = diam_mean
 
         ### set model path
@@ -313,7 +323,6 @@ class CellposeModel():
             self.net = CPnet(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
                              max_pool=True, diam_mean=diam_mean).to(self.device)
         else:
-            print("Using transformer")
             from .segformerv2 import Transformer
             self.net = Transformer(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
                              max_pool=True, diam_mean=diam_mean).to(self.device)
@@ -324,7 +333,6 @@ class CellposeModel():
             try:
                 self.net.load_model(self.pretrained_model, device=self.device)
             except KeyError:    
-                print("Using transformer")
                 from .segformerv2 import Transformer
                 self.net = Transformer(self.nbase, self.nclasses, sz=3, mkldnn=self.mkldnn,
                                 max_pool=True, diam_mean=diam_mean).to(self.device)
@@ -346,7 +354,7 @@ class CellposeModel():
 
         self.net_type = f"cellpose_{backbone}"
 
-    def eval(self, x, batch_size=8, resample=True, channels=None, channel_axis=None,
+    def eval(self, x, metainf = None, batch_size=8, resample=True, channels=None, channel_axis=None,
              z_axis=None, normalize=True, invert=False, rescale=None, diameter=None,
              flow_threshold=0.4, cellprob_threshold=0.0, do_3D=False, anisotropy=None,
              stitch_threshold=0.0, min_size=15, niter=None, augment=False, tile=True,
@@ -406,6 +414,10 @@ class CellposeModel():
                 - styles (list, np.ndarray): style vector summarizing each image of size 256.
             
         """
+        
+        if not isinstance(metainf, list):
+            metainf = [metainf]
+        
         if isinstance(x, list) or x.squeeze().ndim == 5:
             self.timing = []
             masks, styles, flows = [], [], []
@@ -463,7 +475,7 @@ class CellposeModel():
                 rescale = self.diam_mean / diameter
 
             masks, styles, dP, cellprob, p = self._run_cp(
-                x, compute_masks=compute_masks, normalize=normalize, invert=invert,
+                x, metainf = metainf, compute_masks=compute_masks, normalize=normalize, invert=invert,
                 rescale=rescale, resample=resample, augment=augment, tile=tile,
                 tile_overlap=tile_overlap, bsize=bsize, flow_threshold=flow_threshold,
                 cellprob_threshold=cellprob_threshold, interp=interp, min_size=min_size,
@@ -473,11 +485,10 @@ class CellposeModel():
             flows = [plot.dx_to_circ(dP), dP, cellprob, p]
             return masks, flows, styles
 
-    def _run_cp(self, x, compute_masks=True, normalize=True, invert=False, niter=None,
+    def _run_cp(self, x, metainf = None, compute_masks=True, normalize=True, invert=False, niter=None,
                 rescale=1.0, resample=True, augment=False, tile=True, tile_overlap=0.1,
                 cellprob_threshold=0.0, bsize=448, flow_threshold=0.4, min_size=15,
                 interp=True, anisotropy=1.0, do_3D=False, stitch_threshold=0.0):
-
         if isinstance(normalize, dict):
             normalize_params = {**normalize_default, **normalize}
         elif not isinstance(normalize, bool):
@@ -492,6 +503,11 @@ class CellposeModel():
         nimg = shape[0]
 
         bd, tr = None, None
+
+        # generate the onehot vector for channels
+        if metainf is not None:
+            metainf = [np.asarray([self.onehot_dict.get(x, x) for x in list(y.values())])  for y in metainf]
+            
 
         # pre-normalize if 3D stack for stitching or do_3D
         do_normalization = True if normalize_params["normalize"] else False
@@ -533,7 +549,7 @@ class CellposeModel():
                     img = transforms.normalize_img(img, **normalize_params)
                 if rescale != 1.0 and self.net.model_string != "Transformer":
                     img = transforms.resize_image(img, rsz=rescale)
-                yf, style = run_net(self.net, img, bsize=bsize, augment=augment,
+                yf, style = run_net(self.net, img, channels = metainf, bsize=bsize, augment=augment,
                                     tile=tile, tile_overlap=tile_overlap)
                 if resample:
                     yf = transforms.resize_image(yf, shape[1], shape[2])

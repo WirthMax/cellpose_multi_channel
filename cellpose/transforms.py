@@ -505,14 +505,14 @@ def convert_image(x, channels, channel_axis=None, z_axis=None, do_3D=False, ncha
         transforms_logger.info(
             "multi-stack tiff read in as having %d planes %d channels" %
             (x.shape[0], x.shape[-1]))
-
+    
     if channels is not None:
         channels = channels[0] if len(channels) == 1 else channels
         if len(channels) < 2:
             transforms_logger.critical("ERROR: two channels not specified")
             raise ValueError("ERROR: two channels not specified")
         x = reshape(x, channels=channels)
-
+    
     else:
         # code above put channels last
         if nchan is not None and x.shape[-1] > nchan:
@@ -525,7 +525,7 @@ def convert_image(x, channels, channel_axis=None, z_axis=None, do_3D=False, ncha
         #    transforms_logger.critical("ERROR: cannot process 4D images in 2D mode")
         #    raise ValueError("ERROR: cannot process 4D images in 2D mode")
 
-        if nchan is not None and x.shape[-1] < nchan:
+        if channels is not None and nchan is not None and x.shape[-1] < nchan:
             x = np.concatenate((x, np.tile(np.zeros_like(x), (1, 1, nchan - 1))),
                                axis=-1)
 

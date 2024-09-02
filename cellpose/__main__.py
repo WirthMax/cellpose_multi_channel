@@ -34,7 +34,6 @@ def main():
     )  # this has to be in a seperate file for autodoc to work
 
     if args.version:
-        print(version_str)
         return
 
     if args.check_mkl:
@@ -191,7 +190,7 @@ def main():
             for image_name in tqdm(image_names, file=tqdm_out):
                 image, metainf = io.imread(image_name)
                 out = model.eval(
-                    image, channels=channels, diameter=diameter, do_3D=args.do_3D,
+                    image, metainf = metainf, channels=channels, diameter=diameter, do_3D=args.do_3D,
                     augment=args.augment, resample=(not args.no_resample),
                     flow_threshold=args.flow_threshold,
                     cellprob_threshold=args.cellprob_threshold,
@@ -286,7 +285,7 @@ def main():
 
             # train segmentation model
             if args.train:
-                cpmodel_path = train.train_seg(
+                cpmodel_path = pretrain.train_seg(
                     model.net, images, labels, metainf = metainf, 
                     metainf_test = metainf_test, train_files=image_names,
                     test_data=test_images, test_labels=test_labels,

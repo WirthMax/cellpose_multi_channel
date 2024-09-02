@@ -1115,11 +1115,11 @@ class Transformer(nn.Module):
         # self.outConv = nn.Linear(in_features=embed_dim, out_features=3, bias=False)
         # # self.DeepSet2 = nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, 5, 5), stride = 1, padding = (0, 2, 2), bias=False, )
         self.pooling = AutoPool(2)
-        self.DeepSet2 = nn.Sequential(
-            nn.BatchNorm3d(num_features = 3, eps=1e-5, momentum=0.05),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, 5, 5), stride = 1, padding = (0, 2, 2), bias=False)
-        )
+        # self.DeepSet2 = nn.Sequential(
+        #     nn.BatchNorm3d(num_features = 3, eps=1e-5, momentum=0.05),
+        #     nn.ReLU(inplace=True),
+        #     nn.Conv3d(in_channels=3, out_channels=3, kernel_size=(1, 5, 5), stride = 1, padding = (0, 2, 2), bias=False)
+        # )
         
         self.norm_upx4 = norm_layer(embed_dim)
         
@@ -1271,9 +1271,15 @@ class Transformer(nn.Module):
         """
         if self.mkldnn:
             X = X.to_mkldnn()
-        
+            channels = channels.to_mkldnn()
+        X = torch.unsqueeze(X, 1)
+        min_val = []
         channels = self.word_embedding(channels).permute(2, 0, 1)
-        
+        max_val = []
+        for n in range(X.shape[0]):
+            for img in range(X.shape[2]):
+                min_val.append(torch.min(X[n, :, img]).detach().cpu().numpy())
+                max_val.append(torch.max(X[n, :, img]).detach().cpu().numpy())
         # Embedd the channels
         X = X.permute(3, 4, 1, 0, 2)
         X = channels + X

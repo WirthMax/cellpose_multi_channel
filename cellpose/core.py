@@ -159,7 +159,7 @@ def _from_device(X):
     return x
 
 
-def _forward(net, x):
+def _forward(net, x, chans):
     """Converts images to torch tensors, runs the network model, and returns numpy arrays.
 
     Args:
@@ -170,18 +170,20 @@ def _forward(net, x):
         Tuple[numpy.ndarray, numpy.ndarray]: The output predictions (flows and cellprob) and style features.
     """
     X = _to_device(x, net.device)
+    if not chans is None:
+        chans = torch.from_numpy(np.array(chans)).long().to(net.device)
     net.eval()
     if net.mkldnn:
         net = mkldnn_utils.to_mkldnn(net)
     with torch.no_grad():
-        y, style = net(X)[:2]
+        y, style = net(X, chans)[:2]
     del X
     y = _from_device(y)
     style = _from_device(style)
     return y, style
 
 
-def run_net(net, imgs, batch_size=8, augment=False, tile=True, tile_overlap=0.1,
+def run_net(net, imgs, channels, batch_size=8, augment=False, tile=True, tile_overlap=0.1,
             bsize=224):
     """ 
     Run network on image or stack of images.
@@ -227,7 +229,7 @@ def run_net(net, imgs, batch_size=8, augment=False, tile=True, tile_overlap=0.1,
 
     # run network
     if tile or augment or imgs.ndim == 4:
-        y, style = _run_tiled(net, imgs, augment=augment, bsize=bsize,
+        y, style = _run_tiled(net, imgs, channels, augment=augment, bsize=bsize,
                               batch_size=batch_size, tile_overlap=tile_overlap)
     else:
         imgs = np.expand_dims(imgs, axis=0)
@@ -243,7 +245,7 @@ def run_net(net, imgs, batch_size=8, augment=False, tile=True, tile_overlap=0.1,
     return y, style
 
 
-def _run_tiled(net, imgi, batch_size=8, augment=False, bsize=224, tile_overlap=0.1):
+def _run_tiled(net, imgi, channels, batch_size=8, augment=False, bsize=224, tile_overlap=0.1):
     """ 
     Run network on tiles of size [bsize x bsize]
     
@@ -317,7 +319,7 @@ def _run_tiled(net, imgi, batch_size=8, augment=False, bsize=224, tile_overlap=0
         for k in range(niter):
             irange = slice(batch_size * k, min(IMG.shape[0],
                                                batch_size * k + batch_size))
-            y0, style = _forward(net, IMG[irange])
+            y0, style = _forward(net, IMG[irange], channels[irange])
             y[irange] = y0.reshape(irange.stop - irange.start, y0.shape[-3],
                                    y0.shape[-2], y0.shape[-1])
             # check size models!

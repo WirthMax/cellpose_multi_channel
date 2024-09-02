@@ -2259,7 +2259,6 @@ class MainW(QMainWindow):
 
     def compute_saturation(self, return_img=False):
         norm = self.get_normalize_params()
-        print(norm)
         sharpen, smooth = norm["sharpen_radius"], norm["smooth_radius"]
         percentile = norm["percentile"]
         tile_norm = norm["tile_norm_blocksize"]
@@ -2505,7 +2504,6 @@ class MainW(QMainWindow):
                 if "upsample" in self.restore:
                     i = self.DenoiseChoose.currentIndex()
                     diam_up = 30. if i == 0 else 17.
-                    print(diam_up, self.ratio)
                     self.Diameter.setText(str(diam_up / self.ratio))
                 self.compute_denoise_model(model_type=model_type)
             else:
@@ -2575,7 +2573,6 @@ class MainW(QMainWindow):
             print("GUI_INFO: diameter (before upsampling): ", self.diameter)
 
             data = self.stack.copy()
-            print(data.shape)
             self.Ly, self.Lx = data.shape[-3:-1]
             if "upsample" in model_name:
                 # get upsampling factor
@@ -2607,7 +2604,6 @@ class MainW(QMainWindow):
             img_norm = self.denoise_model.eval(data, channels=channels, z_axis=0,
                                                channel_axis=3, diameter=self.diameter,
                                                normalize=normalize_params)
-            print(img_norm.shape)
             self.diameter = diam_up
             self.Diameter.setText(str(diam_up))
 
@@ -2685,8 +2681,8 @@ class MainW(QMainWindow):
             print("ERROR: %s" % e)
 
     def compute_segmentation(self, custom=False, model_name=None, load_model=True):
-        self.progress.setValue(0)
-        try:
+            self.progress.setValue(0)
+        # try:
             tic = time.time()
             self.clear_all()
             self.flows = [[], [], []]
@@ -2698,7 +2694,6 @@ class MainW(QMainWindow):
                 self.stitch_threshold, float) else self.stitch_threshold
             do_3D = False if stitch_threshold > 0. else do_3D
 
-            channels = self.get_channels()
             if self.restore is not None and self.restore != "filter":
                 data = self.stack_filtered.copy().squeeze()
             else:
@@ -2708,26 +2703,18 @@ class MainW(QMainWindow):
             niter = max(0, int(self.niter.text()))
             niter = None if niter == 0 else niter
             normalize_params = self.get_normalize_params()
-            try:
-                masks, flows = self.model.eval(
-                    data, channels=channels, diameter=self.diameter,
+            # try:
+            
+            masks, flows = self.model.eval(
+                    np.moveaxis(data, 2, 0), metainf=self.metainf, diameter=self.diameter,
                     cellprob_threshold=cellprob_threshold,
                     flow_threshold=flow_threshold, do_3D=do_3D, niter=niter,
                     normalize=normalize_params, stitch_threshold=stitch_threshold,
                     progress=self.progress)[:2]
-            except Exception as e:
-                print("NET ERROR: %s" % e)
-                self.progress.setValue(0)
-                return
-            from PIL import Image
-            from matplotlib import cm
-            print(len(flows))
-            print(flows[0].shape)
-            im = Image.fromarray(np.uint8(cm.bwr(flows[0] + 0.5)*255))
-            im.save("/Users/maximilianwirth/Documents/Uni_Tuebingen/WiSe2324/Master_thesis_wirth/Defense/Y_flows.png")
-            im = Image.fromarray(np.uint8(cm.bwr(flows[1] + 0.5)*255))
-            im.save("/Users/maximilianwirth/Documents/Uni_Tuebingen/WiSe2324/Master_thesis_wirth/Defense/Y_flows.png")
-            
+            # except Exception as e:
+            #     print("NET ERROR: %s" % e)
+            #     self.progress.setValue(0)
+            #     return
             self.progress.setValue(75)
 
             # convert flows to uint8 and resize to original image size
@@ -2775,5 +2762,5 @@ class MainW(QMainWindow):
                 self.recompute_masks = True
             else:
                 self.recompute_masks = False
-        except Exception as e:
-            print("ERROR: %s" % e)
+        # except Exception as e:
+        #     print("ERROR: %s" % e)

@@ -794,7 +794,7 @@ def resize_and_compute_masks(dP, cellprob, p=None, niter=200, cellprob_threshold
 
 
 def compute_masks(dP, cellprob, p=None, niter=200, cellprob_threshold=0.0,
-                  flow_threshold=0.4, interp=True, do_3D=False, min_size=15,
+                  flow_threshold=0.4, interp=True, do_3D=False, min_size=30,
                   device=None):
     """Compute masks using dynamics from dP and cellprob.
 

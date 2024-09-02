@@ -111,8 +111,9 @@ def _load_image(parent, filename=None, load_seg=True, load_3D=False):
     manual_file = os.path.splitext(filename)[0] + "_seg.npy"
     load_mask = False
     if load_seg:
+        image, metainf = imread(filename)
         if os.path.isfile(manual_file) and not parent.autoloadMasks.isChecked():
-            _load_seg(parent, manual_file, image=imread(filename)[0], image_file=filename,
+            _load_seg(parent, manual_file, image=image, metainf=metainf, image_file=filename,
                       load_3D=load_3D)
             return
         elif parent.autoloadMasks.isChecked():
@@ -272,6 +273,7 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
         return
 
     parent.reset()
+    print("image is not none", image, metainf)
     if image is None:
         found_image = False
         if "filename" in dat:
@@ -296,6 +298,7 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
             parent.filename = filename[:-8]
             if "img" in dat:
                 image = dat["img"]
+                print("GOT IMG FROM HERE")
             else:
                 print("ERROR: no image file found and no image in npy")
                 return
@@ -346,7 +349,7 @@ def _load_seg(parent, filename=None, image=None, metainf = None, image_file=None
             parent.ratio = dat["ratio"]
 
     parent.set_restore_button()
-
+    print("_load_seg 350", metainf)
     _initialize_images(parent = parent, 
                        image = image, 
                        metainf = metainf, 

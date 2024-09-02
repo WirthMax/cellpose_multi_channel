@@ -619,7 +619,7 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
             
             # B, C, H, W = X.shape
             # add the embedding dimension
-            y = net(X.unsqueeze(1), chans)[0]
+            y = net(X, chans)[0]
             loss, train_MSELoss,train_BCE_loss = _loss_fn_seg(lbl, y, device)
             optimizer.zero_grad()
             loss.backward()
@@ -737,7 +737,7 @@ def train_seg(net, train_data=None, train_labels=None, metainf = None,
                         chans = torch.from_numpy(np.array(chans)).long().to(device)
                         # B, C, H, W = X.shape
                         # add the embedding dimension
-                        y = net(X.unsqueeze(1), chans)[0]
+                        y = net(X, chans)[0]
                         loss, test_MSELoss,test_BCE_loss  = _loss_fn_seg(lbl, y, device)
                         test_loss, test_MSELoss,test_BCE_loss = loss.item(), test_MSELoss.item(),test_BCE_loss.item()
                         test_loss *= len(imgi)
